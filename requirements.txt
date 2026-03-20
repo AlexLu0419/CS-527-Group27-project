@@ -1,0 +1,34 @@
+# =============================================================================
+# EvoEval: Self-Evolving Verification Cascades for Coding Agents
+# =============================================================================
+
+# --- Core agent ---
+mini-swe-agent>=2.2.0            # The backbone coding agent
+
+# --- LLM clients ---
+litellm>=1.40.0                  # Unified LLM API (used by mini-swe-agent internally)
+openai>=1.30.0                   # GPT-4o-mini for checker generation + judge + evolution
+
+# --- SWE-bench infrastructure ---
+datasets>=2.19.0                 # Load SWE-bench instances from HuggingFace
+swebench>=2.1.0                  # Local evaluation harness (optional if using sb-cli)
+
+# --- Evaluation CLI ---
+# Install separately: pip install sb-cli
+# Then: sb-cli setup  (get your free token)
+
+# --- Data & analysis ---
+pandas>=2.0.0                    # Results analysis and comparison tables
+matplotlib>=3.8.0                # Plotting evolution trajectories, layer distributions
+seaborn>=0.13.0                  # Publication-quality figures
+tabulate>=0.9.0                  # Pretty-print comparison tables in terminal
+
+# --- Utilities ---
+pyyaml>=6.0                      # Config file handling
+jinja2>=3.1.0                    # Template rendering (also a mini-swe-agent dep)
+pydantic>=2.0.0                  # Config validation
+rich>=13.0.0                     # Progress bars and terminal formatting
+typer>=0.12.0                    # CLI entry points
+
+# --- Safety for generated checker execution ---
+RestrictedPython>=7.0            # Optional: sandbox for Layer 2 checker execution

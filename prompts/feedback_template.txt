@@ -1,0 +1,23 @@
+<previous_attempts>
+You have already attempted this task {attempt_number} time(s). Your previous
+patch(es) were rejected by automated verification. Please carefully read the
+feedback below and address the identified issues in your next attempt.
+
+Do NOT repeat the same approach if it was flagged as incorrect. Focus specifically
+on the problems identified.
+
+{%- for attempt in feedback_history %}
+
+## Attempt {{loop.index}} — REJECTED
+
+**Rejection layer:** {{attempt.layer}}
+**Reason:** {{attempt.reason}}
+
+{%- if attempt.details %}
+**Details:**
+{{attempt.details}}
+{%- endif %}
+
+{%- endfor %}
+
+</previous_attempts>

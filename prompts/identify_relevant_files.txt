@@ -1,0 +1,22 @@
+Given the following GitHub issue, identify the most likely source files in the
+repository that are relevant to this issue. Look for:
+
+1. File paths mentioned explicitly in the issue text
+2. File paths in tracebacks or error messages
+3. Module paths implied by import statements in code snippets
+4. Class/function names that suggest specific files
+
+## Issue Description
+
+{issue_description}
+
+## Repository file listing (top-level and one level deep)
+
+{file_listing}
+
+## Output format
+
+Return a JSON array of file paths (relative to repo root), ordered by relevance.
+Include at most 5 files. No explanation, just the JSON array.
+
+Example: ["django/db/models/query.py", "django/db/models/sql/compiler.py"]

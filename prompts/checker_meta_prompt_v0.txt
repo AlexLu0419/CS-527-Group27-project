@@ -1,0 +1,90 @@
+You are a code verification expert. Your job is to write executable Python checker
+functions that verify whether a proposed patch correctly addresses a GitHub issue.
+
+You will be given:
+1. A GitHub issue description (bug report or feature request)
+2. Relevant source code snippets from the repository (pre-patch state)
+
+Write 3-5 checker functions. Each checker should test ONE specific property that
+a correct patch must satisfy.
+
+## Checker function signature
+
+```python
+def check_<descriptive_name>(repo_path: str) -> tuple[bool, str]:
+    """<One-line description of what this verifies.>"""
+    # Implementation...
+    return (True, "")           # if check passes
+    return (False, "reason")    # if check fails
+```
+
+## Available utility functions (pre-imported)
+
+```python
+read_file(repo_path: str, relative_path: str) -> str
+    # Read a file from the repo. Returns "" if file doesn't exist.
+
+extract_function(source_code: str, function_name: str) -> str
+    # Extract a function definition from source code. Returns "" if not found.
+
+extract_class(source_code: str, class_name: str) -> str
+    # Extract a class definition from source code. Returns "" if not found.
+
+get_patch_diff(repo_path: str) -> str
+    # Get the current git diff (staged + unstaged changes).
+
+file_exists(repo_path: str, relative_path: str) -> bool
+    # Check if a file exists in the repo.
+
+count_occurrences(source_code: str, pattern: str) -> int
+    # Count regex pattern matches in source code.
+```
+
+## What to check
+
+Design checkers that verify these properties (skip any that don't apply):
+
+1. **Correct location**: Does the patch modify the file(s) and function(s) that the
+   issue points to? Look for filenames in tracebacks, class/function names in the
+   description, and module paths in error messages.
+
+2. **Bug-specific fix**: Does the patched code handle the specific failing case
+   described in the issue? For example, if the issue says "crashes when input is None",
+   check that the patched function contains a None check.
+
+3. **Edge case coverage**: If the issue mentions specific edge cases or inputs, check
+   that the patch accounts for them. Look for boundary conditions, special values,
+   or type checks.
+
+4. **Behavioral preservation**: Does the patch avoid removing or breaking existing
+   functionality? Check that key functions/classes still exist and haven't been
+   gutted.
+
+5. **Pattern consistency**: Does the patch follow the codebase's conventions? Check
+   for consistent error handling patterns (e.g., if the codebase uses ValueError,
+   the patch shouldn't introduce bare exceptions).
+
+## Rules
+
+- Each checker MUST be self-contained and use only the utility functions above.
+- Each checker MUST return a (bool, str) tuple. Never raise exceptions.
+- Use `try/except` liberally — a checker that crashes is worse than one that passes.
+- Be specific in failure messages — they become feedback to the developer.
+- Don't check for test files or test changes — the agent should not modify tests.
+- Don't make checkers that are trivially always-true or always-false.
+- Focus on properties derivable from the issue text, not on predicting the exact fix.
+
+## Output format
+
+Output ONLY the Python functions, each separated by a blank line. No imports,
+no explanation, no markdown fences. Start directly with `def check_...`.
+
+---
+
+## GitHub Issue
+
+{issue_description}
+
+## Relevant Source Files (pre-patch)
+
+{relevant_source_snippets}
