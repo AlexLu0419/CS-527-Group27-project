@@ -406,12 +406,12 @@ Or, for Layer 1 checks that just parse the diff text (syntax, scope, file releva
 
 ### Phase 0: Environment Setup [~1 day]
 
-- [ ] **P0-1.** Install mini-swe-agent: `pip install mini-swe-agent`
-- [ ] **P0-2.** Install evaluation tools: `pip install datasets swebench sb-cli`
-- [ ] **P0-3.** Verify Docker works: run `mini-extra swebench-single --subset lite --split dev -m openai/gpt-4o-mini -i 0` on one instance
-- [ ] **P0-4.** Set up API keys: Together AI (for Qwen2.5-Coder), OpenAI (for GPT-4o-mini)
-- [ ] **P0-5.** Clone the 50-instance subset list from `github.com/mariushobbhahn/SWEBench-verified-mini`
-- [ ] **P0-6.** Create `split.json`: randomly split 50 instances into 15 evolution + 35 evaluation
+- [v] **P0-1.** Install mini-swe-agent: `pip install mini-swe-agent`
+- [v] **P0-2.** Install evaluation tools: `pip install datasets swebench sb-cli`
+- [v] **P0-3.** Verify Docker works: run `mini-extra swebench-single --subset lite --split dev -m openai/gpt-4o-mini -i 0` on one instance
+- [v] **P0-4.** Set up API keys: Together AI (for Qwen2.5-Coder), OpenAI (for GPT-4o-mini)
+- [v] **P0-5.** Clone the 50-instance subset list from `github.com/mariushobbhahn/SWEBench-verified-mini`
+- [v] **P0-6.** Create `split.json`: randomly split 50 instances into 15 evolution + 35 evaluation
 
 ### Phase 1: Baselines [~2-3 days]
 
