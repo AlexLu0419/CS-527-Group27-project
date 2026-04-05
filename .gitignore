@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+._*
+
+# Python
+.venv/
+
+# IDE
+
+# Project
+results/
+*.log

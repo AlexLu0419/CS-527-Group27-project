@@ -1,0 +1,54 @@
+instances_by_exit_status:
+    RateLimitError:
+    - sympy__sympy-13091
+    - sympy__sympy-12489
+    - sympy__sympy-13647
+    - sympy__sympy-14976
+    - sympy__sympy-15809
+    - sympy__sympy-18698
+    - sympy__sympy-19954
+    - sympy__sympy-20438
+    Submitted:
+    - astropy__astropy-7166
+    - django__django-11095
+    - django__django-11119
+    - django__django-11603
+    - astropy__astropy-14182
+    - django__django-12209
+    - django__django-13089
+    - django__django-13023
+    - django__django-13410
+    - django__django-13401
+    - django__django-13925
+    - django__django-13417
+    - django__django-14034
+    - django__django-14311
+    - django__django-14404
+    - django__django-14672
+    - django__django-14351
+    - django__django-14725
+    - django__django-15382
+    - django__django-15814
+    - django__django-15554
+    - django__django-16429
+    - django__django-16667
+    - django__django-16938
+    - django__django-17029
+    - django__django-15930
+    - django__django-17084
+    - django__django-9296
+    - matplotlib__matplotlib-21568
+    - pydata__xarray-3305
+    - pylint-dev__pylint-7277
+    - pydata__xarray-6744
+    - pytest-dev__pytest-10051
+    - scikit-learn__scikit-learn-12973
+    - pytest-dev__pytest-7490
+    - scikit-learn__scikit-learn-25232
+    - scikit-learn__scikit-learn-13135
+    - sphinx-doc__sphinx-7910
+    - sphinx-doc__sphinx-8269
+    - sphinx-doc__sphinx-8265
+    TimeoutExpired:
+    - matplotlib__matplotlib-24970
+    - matplotlib__matplotlib-25311
