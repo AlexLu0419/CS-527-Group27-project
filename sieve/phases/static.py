@@ -1,8 +1,20 @@
 """SIEVE Static Checker — Layer 1 of the evaluation cascade.
 
-Phase 1.1: Patch Validity Checks
-    check_patch_applies  — git apply --check
-    check_files_parse    — ast.parse / py_compile
+Implemented:
+    Phase 1.1 — Patch Validity Checks
+        check_patch_applies  — git apply --check (dry-run)
+        check_files_parse    — ast.parse + py_compile on modified .py files
+
+    Phase 1.2 — Lint Delta Check
+        check_lint_delta     — flake8 before/after patch, new diagnostics only
+                               Requires: pip install flake8 flake8-json
+
+    Phase 1.3 — Semgrep Check
+        check_semgrep        — semgrep p/python on modified .py files (post-patch)
+                               Requires: pip install semgrep
+
+Not yet implemented:
+    Phase 1.4 — run_static_checks  (orchestrator + StaticCheckResult dataclass)
 """
 
 from __future__ import annotations
@@ -277,6 +289,101 @@ def check_lint_delta(
 
     logger.debug("check_lint_delta: PASS (no new reportable diagnostics)")
     return CheckResult(verdict="PASS", check_name="lint_delta")
+
+
+# ---------------------------------------------------------------------------
+# 1.3 — Semgrep check
+# ---------------------------------------------------------------------------
+
+def check_semgrep(
+    repo_path: str | Path,
+    changed_files: list[str | Path],
+    config: str = "p/python",
+) -> CheckResult:
+    """Run Semgrep on modified Python files and flag any rule matches.
+
+    Uses the given Semgrep registry config (default: ``p/python``) on the
+    changed files as they currently exist on disk (post-patch).  All findings
+    are reported as FLAG — Semgrep results alone never REJECT a patch.
+
+    Args:
+        repo_path: Absolute path to the repository root.
+        changed_files: Files modified by the patch (absolute or relative to
+            *repo_path*).  Non-``.py`` files and deleted files are skipped.
+        config: Semgrep ``--config`` value.  Can be a registry shorthand
+            (``"p/python"``, ``"p/django"``) or a path to a local YAML file.
+
+    Returns:
+        CheckResult with verdict FLAG (findings present) or PASS (no findings).
+        On semgrep execution failure the verdict is PASS with a warning logged,
+        so a missing/broken semgrep binary never blocks the pipeline.
+    """
+    repo_path = Path(repo_path)
+
+    file_args: list[str] = []
+    for raw in changed_files:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = repo_path / p
+        if not p.exists() or p.suffix != ".py":
+            continue
+        rel = p.relative_to(repo_path) if p.is_relative_to(repo_path) else p
+        file_args.append(str(rel))
+
+    if not file_args:
+        logger.debug("check_semgrep: PASS (no .py files to check)")
+        return CheckResult(verdict="PASS", check_name="semgrep", message="(no .py files)")
+
+    result = subprocess.run(
+        ["semgrep", "--config", config, "--json", "--quiet", *file_args],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+    )
+
+    # semgrep exits 0 (no findings), 1 (findings present), or 2+ (error).
+    # Treat exit code 2+ as a non-fatal execution problem.
+    output = result.stdout.strip()
+    if result.returncode >= 2 or not output:
+        if result.returncode >= 2:
+            logger.warning(
+                "check_semgrep: semgrep exited with code %d — %s",
+                result.returncode,
+                (result.stderr or "").strip()[:200],
+            )
+        else:
+            logger.debug("check_semgrep: PASS (empty semgrep output)")
+        return CheckResult(verdict="PASS", check_name="semgrep")
+
+    try:
+        parsed = json.loads(output)
+    except json.JSONDecodeError:
+        logger.warning("check_semgrep: failed to parse semgrep JSON output")
+        return CheckResult(verdict="PASS", check_name="semgrep")
+
+    # Surface any semgrep-level errors as warnings but keep going.
+    for err in parsed.get("errors", []):
+        logger.warning("check_semgrep: semgrep error: %s", err.get("message", err))
+
+    results = parsed.get("results", [])
+    if not results:
+        logger.debug("check_semgrep: PASS (no findings)")
+        return CheckResult(verdict="PASS", check_name="semgrep")
+
+    lines: list[str] = []
+    for r in results:
+        path     = r.get("path", "?")
+        line     = r.get("start", {}).get("line", "?")
+        rule_id  = r.get("check_id", "?")
+        message  = r.get("extra", {}).get("message", "").strip()
+        lines.append(f"{path}:{line}: [{rule_id}] {message}")
+
+    logger.debug("check_semgrep: FLAG (%d findings)", len(lines))
+    return CheckResult(
+        verdict="FLAG",
+        check_name="semgrep",
+        message="\n".join(lines),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,26 @@ This guide covers how to set up and run [mini-swe-agent](https://github.com/SWE-
 - Python 3.10+
 - Docker (required to run SWE-bench evaluation environments)
 
+## Setup
+
+Install [uv](https://docs.astral.sh/uv/) if you don't have it:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Create the environment and install all dependencies from `pyproject.toml`:
+
+```bash
+uv sync
+```
+
+To run a script without activating the environment:
+
+```bash
+uv run python -m sieve.reproduction.runner --help
+```
+
 ## Environment Setup
 
 ### 1. Clone and install mini-swe-agent

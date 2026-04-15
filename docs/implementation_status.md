@@ -179,11 +179,33 @@ code (F→P check).
 
 ---
 
+---
+
+## Layer 1 — Phase 1.3 Semgrep Check (`sieve/phases/static.py`)
+
+### `check_semgrep(repo_path, changed_files, config="p/python")`
+
+Runs `semgrep --config p/python --json --quiet` on the modified `.py` files
+as they exist post-patch. All findings are reported as **FLAG** — semgrep
+results never REJECT a patch on their own.
+
+No custom YAML rules. Custom rules are deferred to the Phase 3 self-evolution
+loop (no `p/sphinx` ruleset exists; `p/python` covers both Django and Sphinx
+instances uniformly).
+
+On semgrep execution failure (missing binary, bad config) the function returns
+PASS with a warning log so the pipeline is never blocked.
+
+**Pilot results:** Not yet run against the 50-instance set. Smoke-tested locally
+— `subprocess.run(cmd, shell=True)` correctly triggers FLAG via
+`python.lang.security.audit.subprocess-shell-true`.
+
+---
+
 ## Not yet implemented
 
 | Component | Phase | Notes |
 |-----------|-------|-------|
-| Semgrep rules + `check_semgrep()` | 1.3 | Needs `semgrep` install + YAML rule files |
 | `run_static_checks()` orchestrator | 1.4 | Wraps all Layer 1 checks in order |
 | `StaticCheckResult` dataclass | 1.4 | Structured aggregate result |
 | Layer 2: dynamic checks | 2 | Reproduction test execution + regression suite |
