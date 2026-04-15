@@ -1,0 +1,13 @@
+[project]
+name = "self-improving-evaluation-via-verification-evolution-for-swe-agents"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "datasets>=4.8.4",
+    "flake8>=7.3.0",
+    "flake8-json>=24.4.0",
+    "litellm>=1.83.8",
+    "semgrep>=1.141.0",
+]
