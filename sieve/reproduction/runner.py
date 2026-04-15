@@ -29,7 +29,7 @@ def run_single(agent: ReproductionAgent, instance: dict) -> ReproductionResult:
 
 def run_batch(
     instances: list[dict],
-    model_name: str = "gemini/gemini-2.5-flash",
+    model_name: str = "gemini/gemini-3-flash-preview",
     max_attempts: int = 3,
     execution_timeout: int = 60,
     workers: int = 1,
@@ -175,7 +175,7 @@ def main():
     parser.add_argument(
         "-m", "--model",
         type=str,
-        default="gemini/gemini-2.5-flash",
+        default="gemini/gemini-3-flash-preview",
         help="LLM model name (via litellm)",
     )
     parser.add_argument(

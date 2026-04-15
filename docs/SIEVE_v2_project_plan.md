@@ -142,7 +142,7 @@ The cascade is ordered by cost and determinism. Each layer can REJECT (with feed
 | Check | Signal | Action |
 |-------|--------|--------|
 | Reproduction test on patched code | PASS/FAIL | REJECT if FAIL: "Repro test still fails: {error}" |
-| Existing repo test suite | New failures | REJECT if regressions: "Tests X, Y now fail" |
+| Existing repo test suite and regression test suite | New failures | REJECT if regressions: "Tests X, Y now fail" |
 
 **Layer 3 — LLM Audit (cost: ~$0.02, only for patches surviving Layer 1-2)**
 

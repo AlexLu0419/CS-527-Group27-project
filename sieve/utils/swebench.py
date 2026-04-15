@@ -69,7 +69,7 @@ def create_docker_env(instance: dict, timeout: int = 60) -> "DockerEnvironment":
             "environment_class": "docker",
             "cwd": "/testbed",
             "timeout": timeout,
-            "interpreter": ["bash", "-c"],
+            "interpreter": ["bash", "-lc"],
             "env": {
                 "PAGER": "cat",
                 "MANPAGER": "cat",
