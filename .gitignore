@@ -9,6 +9,7 @@
 **/*.pyo
 
 # IDE
+.env
 
 # Project
 *.log
