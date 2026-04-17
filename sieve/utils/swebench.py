@@ -15,10 +15,6 @@ DATASET_MAPPING = {
     "lite": "princeton-nlp/SWE-Bench_Lite",
 }
 
-# Reuse mini-swe-agent's Docker environment setup
-from minisweagent.run.benchmarks.swebench import get_sb_environment
-
-
 def load_instances(
     subset: str = "verified",
     split: str = "test",
@@ -64,6 +60,10 @@ def create_docker_env(instance: dict, timeout: int = 60) -> "DockerEnvironment":
     Returns:
         A DockerEnvironment connected to the instance's container.
     """
+    # Lazy import: avoids pulling in mini-swe-agent at module load time
+    # (minisweagent transitively imports typer, which has Python 3.13 issues).
+    from minisweagent.run.benchmarks.swebench import get_sb_environment  # noqa: PLC0415
+
     config = {
         "environment": {
             "environment_class": "docker",
