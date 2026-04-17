@@ -116,7 +116,10 @@ def _build_kwargs(
 
 
 def _call_litellm(kwargs: dict) -> Any:
+    import litellm
     from litellm import completion
+
+    litellm.drop_params = True
 
     retry_decorator = retry(
         reraise=True,
