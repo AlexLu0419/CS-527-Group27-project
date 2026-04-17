@@ -1,0 +1,19 @@
+{
+  "sieve_roles": {
+    "localize": "gemini/gemini-2.5-flash",
+    "generate": "openai/gpt-5-mini",
+    "feedback": "gemini/gemini-2.5-flash",
+    "judge":    "gemini/gemini-2.5-pro"
+  },
+  "mini_swe_agent": "openai/gpt-5-mini",
+  "providers": {
+    "openai": {"env_var": "OPENAI_API_KEY"},
+    "gemini": {"env_var": "GEMINI_API_KEY"}
+  },
+  "env_overrides": {
+    "localize": "SIEVE_MODEL_LOCALIZE",
+    "generate": "SIEVE_MODEL_GENERATE",
+    "feedback": "SIEVE_MODEL_FEEDBACK",
+    "judge":    "SIEVE_MODEL_JUDGE"
+  }
+}

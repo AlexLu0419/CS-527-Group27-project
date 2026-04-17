@@ -1,0 +1,63 @@
+id: mask_raw
+version: 1
+role: generate
+temperature: 0.5
+n_samples: 2
+system: |
+  You are a software engineer writing a standalone test that reproduces a bug reported in an issue.
+template: |
+  We are currently solving the following issue within our repository. Here is the issue text:
+
+  --- BEGIN ISSUE ---
+  {{ issue_title }}
+
+  {{ issue_body }}
+  --- END ISSUE ---
+
+  Please generate a complete test that can be used to reproduce the issue.
+
+  The complete test should contain the following:
+  1. Necessary imports (assume the repository is on the Python path)
+  2. Code to reproduce the issue described in the issue text
+  3. Print "Issue reproduced" if the outcome indicates that the issue is reproduced
+  4. Print "Issue resolved" if the outcome indicates that the issue has been successfully resolved
+  5. Print "Other issues" if the outcome indicates there are other issues with the source code
+
+  Additionally, the script MUST exit with:
+  - exit code 2 if "Issue reproduced" was printed
+  - exit code 0 if "Issue resolved" was printed
+  - exit code 1 if "Other issues" was printed
+
+  Here is an example:
+
+  ```python
+  from sqlfluff import lint
+  import sys
+
+  def test__rules__std_L060_raised() -> None:
+      try:
+          sql = "SELECT IFNULL(NULL, 100), NVL(NULL,100);"
+          result = lint(sql, rules=["L060"])
+          assert len(result) == 2
+      except Exception:
+          print("Other issues")
+          sys.exit(1)
+      try:
+          assert result[0]["description"] == "Use 'COALESCE' instead of 'IFNULL'."
+          assert result[1]["description"] == "Use 'COALESCE' instead of 'NVL'."
+          print("Issue resolved")
+          sys.exit(0)
+      except AssertionError:
+          print("Issue reproduced")
+          sys.exit(2)
+
+  test__rules__std_L060_raised()
+  ```
+
+  Constraints:
+  - Use only Python standard library plus the repository's own modules.
+  - Do not import from pytest fixtures or conftest.py.
+  - The script must be runnable with `python reproduce_bug.py` with no arguments.
+  {% if symbol_name %}- The test targets the symbol: {{ symbol_name }}{% if import_path %} (imported from {{ import_path }}){% endif %}.{% endif %}
+
+  Wrap the complete test in ```python...```.

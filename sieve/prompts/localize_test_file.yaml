@@ -1,0 +1,42 @@
+id: localize_test_file
+version: 1
+role: localize
+temperature: 0.0
+system: |
+  You are a software engineer familiar with this repository's structure.
+  Your job is to identify the test file that would be the natural home for a new test
+  reproducing the issue described below.
+template: |
+  Given the issue and the repository structure, identify the single most likely
+  test file where a reproduction test for this issue would live.
+
+  --- ISSUE SUMMARY ---
+  {{ one_line_summary }}
+
+  Affected modules: {{ affected_modules | join(", ") if affected_modules else "(none)" }}
+  Exception type: {{ exception_type or "(none)" }}
+  --- END SUMMARY ---
+
+  --- REPOSITORY TEST DIRECTORY STRUCTURE ---
+  {{ test_dir_listing }}
+  --- END STRUCTURE ---
+
+  Return the single most likely test file path, relative to the repo root.
+  If multiple candidates are equally plausible, return the one whose name best matches
+  the module mentioned in the issue.
+
+  If no existing test file is an obvious match, return the test directory where a new
+  test file would most naturally be created, with is_new_file: true.
+output_schema:
+  type: object
+  required: [test_file_path, is_new_file, confidence]
+  properties:
+    test_file_path:
+      type: string
+    is_new_file:
+      type: boolean
+    confidence:
+      type: string
+      enum: [low, medium, high]
+    rationale:
+      type: string

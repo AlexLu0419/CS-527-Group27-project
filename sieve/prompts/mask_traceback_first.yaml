@@ -1,0 +1,48 @@
+id: mask_traceback_first
+version: 1
+role: generate
+temperature: 0.5
+n_samples: 2
+system: |
+  You are a software engineer writing a standalone test that reproduces a bug, anchoring on a specific exception trajectory.
+template: |
+  The following issue was reported. A traceback is available — your test should
+  reproduce the exact exception trajectory shown in the traceback.
+
+  --- ISSUE SUMMARY ---
+  {{ one_line_summary }}
+  --- END SUMMARY ---
+
+  --- TRACEBACK ---
+  {{ traceback }}
+  --- END TRACEBACK ---
+
+  Please generate a complete test that:
+  1. Exercises the code path shown in the traceback
+  2. Uses `with pytest.raises({{ exception_type or "Exception" }})` or equivalent to catch the specific exception
+  3. Additionally asserts that the exception message or the failure mode matches what the issue describes
+  4. Prints "Issue reproduced" / "Issue resolved" / "Other issues" following the same convention as below
+  5. Exits with codes 2 / 0 / 1 respectively
+
+  Example of the print-and-exit convention:
+
+  ```python
+  import sys
+  try:
+      # ... trigger the bug ...
+      pass
+  except {{ exception_type or "Exception" }} as e:
+      # If we got the expected exception with the right message, bug is reproduced
+      if "<expected fragment>" in str(e):
+          print("Issue reproduced"); sys.exit(2)
+      print("Other issues"); sys.exit(1)
+  # If no exception: either resolved or the code path wasn't exercised
+  print("Issue resolved"); sys.exit(0)
+  ```
+
+  Constraints:
+  - Use only Python standard library plus the repository's own modules.
+  - Focus the test on the exception trajectory, not on broader behavior.
+  {% if symbol_name %}- The test targets the symbol: {{ symbol_name }}{% if import_path %} (imported from {{ import_path }}){% endif %}.{% endif %}
+
+  Wrap the complete test in ```python...```.

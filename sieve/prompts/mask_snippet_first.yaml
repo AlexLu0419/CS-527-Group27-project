@@ -1,0 +1,49 @@
+id: mask_snippet_first
+version: 1
+role: generate
+temperature: 0.5
+n_samples: 2
+system: |
+  You are a software engineer writing a standalone test that reproduces a bug, starting from the reporter's own example code.
+template: |
+  The following issue was reported, and the reporter included a code snippet that triggers the bug.
+
+  --- ISSUE SUMMARY ---
+  {{ one_line_summary }}
+
+  Expected: {{ expected_behavior }}
+  Actual: {{ actual_behavior }}
+  --- END SUMMARY ---
+
+  --- REPORTER'S SNIPPET ---
+  {{ reporter_snippet }}
+  --- END SNIPPET ---
+
+  Please generate a complete test that:
+  1. Mirrors the structure of the reporter's snippet as closely as possible
+  2. Adds explicit assertions for the expected behavior (not just exception catching — compare the produced value against what the issue says it should be)
+  3. Prints "Issue reproduced" / "Issue resolved" / "Other issues" following the same convention as below
+  4. Exits with codes 2 / 0 / 1 respectively
+
+  Example of the print-and-exit convention:
+
+  ```python
+  import sys
+  try:
+      # ... run snippet ...
+      produced = do_something()
+      expected = "<expected>"
+  except Exception:
+      print("Other issues"); sys.exit(1)
+  if produced == expected:
+      print("Issue resolved"); sys.exit(0)
+  else:
+      print("Issue reproduced"); sys.exit(2)
+  ```
+
+  Constraints:
+  - Use only Python standard library plus the repository's own modules.
+  - Stay faithful to the reporter's API calls — don't substitute similar-but-different methods.
+  {% if symbol_name %}- The test targets the symbol: {{ symbol_name }}{% if import_path %} (imported from {{ import_path }}){% endif %}.{% endif %}
+
+  Wrap the complete test in ```python...```.

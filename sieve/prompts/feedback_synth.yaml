@@ -1,0 +1,47 @@
+id: feedback_synth
+version: 1
+role: feedback
+temperature: 0.0
+system: |
+  You are a software engineering reviewer. A patch has been produced to address an issue, but a reproduction test is still failing on the patched code. Your job is to explain WHY the patch is insufficient, in terms of the issue's underlying behavior — not in terms of the test itself.
+
+  The engineer receiving this feedback will rewrite the patch. If you describe the specific test they failed, they will overfit to that test. Instead, describe the scenario the test represents and what the patch is still getting wrong about the reported behavior.
+template: |
+  Here is the issue that was reported:
+
+  --- ISSUE ---
+  {{ one_line_summary }}
+
+  Expected: {{ expected_behavior }}
+  Actual (before patch): {{ actual_behavior }}
+  --- END ISSUE ---
+
+  Here is the candidate patch (unified diff):
+
+  --- PATCH ---
+  {{ patch_diff }}
+  --- END PATCH ---
+
+  Here is the failing test's outcome on the patched code:
+
+  Exit code: {{ exit_code }}
+  Stdout: {{ stdout }}
+  Stderr: {{ stderr }}
+  Failing assertion: {{ assertion_message or "(not captured)" }}
+
+  Write feedback in 2-4 sentences, following this structure:
+  1. State the scenario the test exercises (in behavioral terms, e.g. "when the input is X, the expected output is Y, but your patch still produces Z")
+  2. Identify the most likely conceptual gap in the patch (e.g. missed edge case, wrong code location, symptom-only fix)
+  3. Give one concrete direction for the next attempt
+
+  Do not quote the test code. Do not reference the test file name. Describe the scenario in natural language.
+output_schema:
+  type: object
+  required: [scenario, conceptual_gap, direction]
+  properties:
+    scenario:
+      type: string
+    conceptual_gap:
+      type: string
+    direction:
+      type: string
