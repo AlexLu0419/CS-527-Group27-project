@@ -113,7 +113,6 @@ def process_instance(
         result = run_dynamic_checks(
             instance,
             patch_content,
-            repro_test_code=None,
             timeout=timeout,
         )
     except Exception as exc:
