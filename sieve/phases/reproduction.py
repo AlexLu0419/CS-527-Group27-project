@@ -42,6 +42,7 @@ class PerTestResult:
     exit_code: int
     marker: str | None         # "Issue reproduced" | "Issue resolved" | "Other issues" | None
     stdout_tail: str
+    counted: bool = True       # False ⇒ marker was "Other issues": abstains from vote
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -85,11 +86,37 @@ def _did_pass(exit_code: int, stdout: str) -> bool:
 
 
 def _compute_score(results: list[PerTestResult]) -> float:
-    total_w = sum(r.weight for r in results)
+    counted = [r for r in results if r.counted]
+    total_w = sum(r.weight for r in counted)
     if total_w <= 0:
         return 0.0
-    hit = sum(r.weight for r in results if r.passed)
+    hit = sum(r.weight for r in counted if r.passed)
     return hit / total_w
+
+
+def _apply_corroboration(
+    results: list[PerTestResult],
+    mapped: str,
+) -> tuple[str, str]:
+    """Downgrade insufficient FAILs to UNCERTAIN.
+
+    Keep FAIL iff:
+      * ≥1 non-C counted failing test, or
+      * ≥2 counted failing C-bucket tests AND no counted passing test at
+        the same-or-higher bucket.
+    """
+    if mapped != "FAIL":
+        return mapped, ""
+    counted_fail = [r for r in results if r.counted and not r.passed]
+    counted_pass = [r for r in results if r.counted and r.passed]
+    non_c_fail = [r for r in counted_fail if r.bucket != "C"]
+    c_fail = [r for r in counted_fail if r.bucket == "C"]
+    non_c_pass = [r for r in counted_pass if r.bucket != "C"]
+    if non_c_fail:
+        return "FAIL", f"non-C failing tests: {len(non_c_fail)}"
+    if len(c_fail) >= 2 and not non_c_pass:
+        return "FAIL", f"{len(c_fail)} agreeing C-bucket failing tests"
+    return "UNCERTAIN", "corroboration_insufficient"
 
 
 def _buckets_used(results: list[PerTestResult]) -> dict[str, int]:
@@ -161,6 +188,7 @@ def phase_b(
         g = by_id[cand_id]
         marker = _detect_marker(stdout or "")
         passed = _did_pass(exit_code, stdout or "")
+        counted = marker != "Other issues"
         per.append(PerTestResult(
             cand_id=cand_id,
             bucket=g.bucket,
@@ -169,19 +197,40 @@ def phase_b(
             exit_code=exit_code,
             marker=marker,
             stdout_tail=(stdout or "")[-500:],
+            counted=counted,
         ))
 
+    n_counted = sum(1 for r in per if r.counted)
+    if n_counted == 0:
+        return ReproductionVerdict(
+            verdict="UNCERTAIN_ZERO_SIGNAL",
+            score=0.0,
+            per_test=per,
+            buckets_used=_buckets_used(per),
+            message=f"no counted tests: all abstained (total={len(per)})",
+        )
+
     score = _compute_score(per)
-    verdict_label = _map_verdict(score)
+    mapped = _map_verdict(score)
+    final, corroboration_note = _apply_corroboration(per, mapped)
+    parts = [f"weighted_score={score:.3f}", f"counted={n_counted}/{len(per)}"]
+    if corroboration_note:
+        parts.append(corroboration_note)
+    if final != mapped:
+        parts.append(f"downgraded_from={mapped}")
     verdict = ReproductionVerdict(
-        verdict=verdict_label,
+        verdict=final,
         score=score,
         per_test=per,
         buckets_used=_buckets_used(per),
-        message=f"weighted_score={score:.3f} over {len(per)} tests",
+        message="; ".join(parts),
     )
 
-    if verdict_label == "FAIL":
+    # v9: synthesize reviewer notes on FAIL **and** UNCERTAIN when there's at
+    # least one counted failing per-test. UNCERTAIN instances have the same
+    # fail-signal shape (counted failing test + issue + patch) — just weaker
+    # aggregate score — so the synth is equally useful as retry feedback.
+    if final in ("FAIL", "UNCERTAIN") and any(r.counted and not r.passed for r in per):
         fb_obj = _synthesize_from_worst_failing(issue, patch_content, per)
         if fb_obj is not None:
             verdict.feedback = fb_obj.to_text() or None
@@ -195,7 +244,7 @@ def _synthesize_from_worst_failing(
     patch_content: str,
     per: list[PerTestResult],
 ) -> Feedback | None:
-    failing = [r for r in per if not r.passed]
+    failing = [r for r in per if r.counted and not r.passed]
     if not failing:
         return None
     # Highest-weight failing test; break ties by bucket rank then cand_id.

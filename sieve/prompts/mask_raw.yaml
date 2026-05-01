@@ -60,4 +60,20 @@ template: |
   - The script must be runnable with `python reproduce_bug.py` with no arguments.
   {% if symbol_name %}- The test targets the symbol: {{ symbol_name }}{% if import_path %} (imported from {{ import_path }}){% endif %}.{% endif %}
 
+  Test-depth requirement (IMPORTANT for distinguishing real fixes from
+  workarounds): if the issue mentions a specific class, method, attribute,
+  or property by name (e.g. `Choices.__str__`, `Field.parent_link`,
+  `Collector.fast_deletes`, `Model.check`), assert on that exact API
+  surface DIRECTLY — not only on a user-facing wrapper that happens to
+  call it. Workaround patches often fix the user-visible symptom while
+  leaving the named API broken; only a direct assertion catches the gap.
+  Where useful, also assert on implementation invariants (query counts,
+  exact attribute values, internal dictionary contents) — not just that
+  an operation succeeds without error.
+  {% if test_framework_hint %}
+
+  Framework-specific setup (IMPORTANT — follow this to make the test actually exercise the bug):
+  {{ test_framework_hint }}
+  {% endif %}
+
   Wrap the complete test in ```python...```.

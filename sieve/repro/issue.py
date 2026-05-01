@@ -13,7 +13,7 @@ from sieve.prompts import load_prompt
 
 logger = logging.getLogger("sieve.repro.issue")
 
-_BODY_MAX_CHARS = 4096
+_BODY_MAX_CHARS = 8192
 
 _TRACEBACK_RE = re.compile(
     r"Traceback \(most recent call last\):(?:\n.+)+?\n([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Warning))",

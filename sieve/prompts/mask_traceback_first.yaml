@@ -45,4 +45,18 @@ template: |
   - Focus the test on the exception trajectory, not on broader behavior.
   {% if symbol_name %}- The test targets the symbol: {{ symbol_name }}{% if import_path %} (imported from {{ import_path }}){% endif %}.{% endif %}
 
+  Test-depth requirement (IMPORTANT for distinguishing real fixes from
+  workarounds): if the issue mentions a specific class, method, attribute,
+  or property by name, assert on that exact API surface DIRECTLY — not
+  only on a user-facing wrapper. Workaround patches often suppress the
+  exception path while leaving the named API broken; assert that the
+  named API behaves correctly (returns the expected value, holds the
+  expected attribute) in addition to confirming the exception is no
+  longer raised.
+  {% if test_framework_hint %}
+
+  Framework-specific setup (IMPORTANT — follow this to make the test actually exercise the bug):
+  {{ test_framework_hint }}
+  {% endif %}
+
   Wrap the complete test in ```python...```.

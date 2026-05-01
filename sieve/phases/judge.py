@@ -58,6 +58,7 @@ def run_judge(judge_input: JudgeInput, *, model: str | None = None) -> JudgeOutp
         failing_tests=judge_input.failing_tests,
         passing_tests=judge_input.passing_tests,
         context_lines=judge_input.context_lines,
+        zero_signal=judge_input.zero_signal,
     )
 
     resp = complete(

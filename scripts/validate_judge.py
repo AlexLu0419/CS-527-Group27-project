@@ -15,16 +15,20 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-PREDS_JSON = (
+DEFAULT_PREDS = (
     REPO_ROOT
     / "runs/swe-verified_50_gemini-2.5-pro"
     / "swe_verified_50_gemini-2.5-pro-new"
     / "preds.json"
 )
-REPRO_JSON = REPO_ROOT / "runs/reproduction_validation/results.json"
-OUTPUT_DIR = REPO_ROOT / "runs/judge_validation"
-OUTPUT_JSON = OUTPUT_DIR / "results.json"
-SUMMARY_JSON = OUTPUT_DIR / "summary.json"
+DEFAULT_REPRO = REPO_ROOT / "runs/reproduction_validation/results.json"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs/judge_validation"
+
+PREDS_JSON: Path = DEFAULT_PREDS
+REPRO_JSON: Path = DEFAULT_REPRO
+OUTPUT_DIR: Path = DEFAULT_OUTPUT_DIR
+OUTPUT_JSON: Path = OUTPUT_DIR / "results.json"
+SUMMARY_JSON: Path = OUTPUT_DIR / "summary.json"
 
 from sieve.judge.aggregate import aggregate
 from sieve.judge.assemble import assemble_judge_input
@@ -47,10 +51,27 @@ def _rebuild_repro(row: dict) -> ReproductionVerdict:
 
 
 def main() -> None:
+    global PREDS_JSON, REPRO_JSON, OUTPUT_DIR, OUTPUT_JSON, SUMMARY_JSON
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--only", type=str, default=None)
+    parser.add_argument("--preds", type=Path, default=DEFAULT_PREDS,
+                        help="Path to preds.json (mini-swe-agent output)")
+    parser.add_argument("--repro", type=Path, default=DEFAULT_REPRO,
+                        help="Path to reproduction results.json")
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
+                        help="Directory for results.json / summary.json")
     args = parser.parse_args()
+
+    PREDS_JSON = args.preds
+    REPRO_JSON = args.repro
+    OUTPUT_DIR = args.output_dir
+    OUTPUT_JSON = OUTPUT_DIR / "results.json"
+    SUMMARY_JSON = OUTPUT_DIR / "summary.json"
+
+    print(f"Preds : {PREDS_JSON}")
+    print(f"Repro : {REPRO_JSON}")
+    print(f"Output: {OUTPUT_DIR}")
 
     if not REPRO_JSON.exists():
         print(f"ERROR: {REPRO_JSON} missing. Run validate_reproduction.py first.", file=sys.stderr)
@@ -59,12 +80,16 @@ def main() -> None:
     repro_rows = json.loads(REPRO_JSON.read_text())
     preds = json.loads(PREDS_JSON.read_text())
 
-    uncertain = [r for r in repro_rows if r["verdict"] == "UNCERTAIN"]
+    roster = [r for r in repro_rows if r["verdict"] in ("UNCERTAIN", "UNCERTAIN_ZERO_SIGNAL")]
+
     if args.only:
         sel = set(s.strip() for s in args.only.split(",") if s.strip())
-        uncertain = [r for r in uncertain if r["instance_id"] in sel]
+        roster = [r for r in roster if r["instance_id"] in sel]
 
-    print(f"UNCERTAIN patches to judge: {len(uncertain)}")
+    n_uncertain = sum(1 for r in roster if r["verdict"] == "UNCERTAIN")
+    n_zero_signal = sum(1 for r in roster if r["verdict"] == "UNCERTAIN_ZERO_SIGNAL")
+    print(f"Patches to judge: {len(roster)} (UNCERTAIN={n_uncertain}, "
+          f"UNCERTAIN_ZERO_SIGNAL={n_zero_signal})")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     done: set[str] = set()
@@ -73,7 +98,7 @@ def main() -> None:
         results = json.loads(OUTPUT_JSON.read_text())
         done = {r["instance_id"] for r in results}
 
-    remaining = [r for r in uncertain if r["instance_id"] not in done]
+    remaining = [r for r in roster if r["instance_id"] not in done]
     if remaining:
         instances_list = load_instances(subset="verified", instance_ids=[r["instance_id"] for r in remaining])
         instances_by_id = {inst["instance_id"]: inst for inst in instances_list}

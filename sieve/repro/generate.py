@@ -1,4 +1,14 @@
-"""Generate reproduction test candidates across 3 masks × N samples."""
+"""Generate reproduction test candidates across 3 masks × N samples.
+
+v6 reverted the Mask-4 (behavior-contract) experiment: its tests routed
+to A or C at the gate (never B) and the judge rated the resulting
+reproduction tests as *less* legitimate (v5 `failing_tests_legitimate`
+dropped 0.136 → 0.062). The contract mask relied on LLM-inferred
+"presumed:" expected/actual text (P3 issue enrichment), which produced
+over-specific assertions. See `runs/SIEVE_VARIANT_COMPARISON.md` for
+the post-mortem. The prompt file `mask_behavior_contract.yaml` remains
+on disk as project history but has no call site.
+"""
 from __future__ import annotations
 
 import logging
@@ -55,6 +65,62 @@ def _issue_title_body(issue: IssueBundle) -> tuple[str, str]:
     return issue.one_line_summary, issue.body or raw
 
 
+_SPHINX_HINT = """\
+This repository is **Sphinx**.
+- The script is executed as `python <file>.py` (no pytest), so you CANNOT use `@pytest.mark.sphinx`, `SphinxTestApp` fixtures, or `tests/roots/test-*` testroots directly.
+- To drive an actual Sphinx build, synthesize a minimal site in a tempdir and instantiate the Sphinx application programmatically:
+    ```python
+    import tempfile, os
+    from pathlib import Path
+    from sphinx.application import Sphinx
+
+    src = Path(tempfile.mkdtemp())
+    (src / "conf.py").write_text("project='t'\\nextensions=['sphinx.ext.autodoc']\\nmaster_doc='index'\\n")
+    (src / "index.rst").write_text(".. autoclass:: mymod.MyClass\\n")
+    out = src / "_build"
+    app = Sphinx(str(src), str(src), str(out), str(out / ".doctrees"), buildername="html")
+    app.build()
+    # then assert on (out / "index.html").read_text() or on app.env.*
+    ```
+- For pure RST/docutils parsing bugs (no full build needed), import `sphinx.parsers`, `sphinx.util.docutils`, or `docutils.utils.new_document` directly.
+- For autodoc-specific bugs, create a small Python module on `sys.path`, then run a minimal build against a conf.py that enables `sphinx.ext.autodoc` and an index.rst containing `.. autoclass:: / .. autofunction::`.
+"""
+
+_DJANGO_HINT = """\
+This repository is **Django**.
+- The script is executed as `python <file>.py`. BEFORE importing any django models/forms/widgets, configure settings + call setup:
+    ```python
+    import django
+    from django.conf import settings
+    if not settings.configured:
+        settings.configure(
+            DEBUG=True,
+            DATABASES={"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}},
+            INSTALLED_APPS=[
+                "django.contrib.contenttypes",
+                "django.contrib.auth",
+                # add the specific app(s) touched by the bug here
+            ],
+            USE_TZ=True,
+        )
+    django.setup()
+    ```
+- For model/ORM bugs: after `django.setup()`, call `from django.core.management import call_command; call_command('migrate', run_syncdb=True, verbosity=0)` before using the ORM.
+- For forms/widgets bugs: settings configuration alone is usually enough — no DB needed — just import the widget/form and exercise it.
+- Do NOT use `django.test.TestCase`, `SimpleTestCase`, or `manage.py test` — they require a test runner. Use plain `assert` and the print/exit convention.
+- For admin/utils bugs, you may need to install the `admin` / `sessions` apps; read the bug's traceback to decide.
+"""
+
+
+def _test_framework_hint(repo: str) -> str:
+    repo_lc = (repo or "").lower()
+    if "sphinx" in repo_lc:
+        return _SPHINX_HINT
+    if "django" in repo_lc:
+        return _DJANGO_HINT
+    return ""
+
+
 def _call_mask(
     spec_name: str,
     ctx: dict,
@@ -80,7 +146,8 @@ def generate_candidates(
     localization: Localization,
     *,
     n_samples_per_mask: int = 2,
-    temperature: float = 0.5,
+    temperature: float = 1.0,
+    repo: str = "",
 ) -> list[Candidate]:
     """Produce up to 3 * n_samples_per_mask candidates.
 
@@ -89,17 +156,20 @@ def generate_candidates(
     tagged with sample_idx offset to distinguish from the primary Mask-1 samples.
     """
     title, body = _issue_title_body(issue)
+    affected_modules_joined = "\n".join(f"- {m}" for m in (issue.affected_modules or []))
     common = dict(
         issue_title=title,
         issue_body=body,
         one_line_summary=issue.one_line_summary or title,
         expected_behavior=issue.expected or "(unknown)",
         actual_behavior=issue.actual or "(unknown)",
+        affected_modules_joined=affected_modules_joined,
         traceback=issue.traceback or "",
         reporter_snippet=issue.reporter_snippet or "",
         exception_type=issue.exception_type or "",
         symbol_name=localization.focal_symbol or "",
         import_path=localization.import_path or "",
+        test_framework_hint=_test_framework_hint(repo),
     )
 
     candidates: list[Candidate] = []

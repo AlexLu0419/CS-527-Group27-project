@@ -23,6 +23,109 @@ logger = logging.getLogger("sieve.repro.localize")
 
 _REPAIR_THRESHOLD = 85
 _TEST_DIR_LISTING_MAX = 120  # lines
+_MAX_FOCAL_FILES = 3         # top-k focal files for richer LLM context
+_MAX_SYMBOL_GREP_HITS = 3    # v12 A: cap files promoted by symbol search
+
+
+def _is_test_path(p: str) -> bool:
+    """Heuristic: path looks like a test file (v12 C)."""
+    low = (p or "").lower().replace("\\", "/")
+    if not low:
+        return False
+    if "/tests/" in low or low.startswith("tests/") or low.startswith("test/") or "/test/" in low:
+        return True
+    base = low.rsplit("/", 1)[-1]
+    return base.startswith("test_") or base.endswith("_test.py") or base == "tests.py"
+
+
+def _symbol_name_parts(symbol: str) -> tuple[str, str | None]:
+    """Parse a dotted symbol like 'TextChoices.__str__' into (leaf, container).
+
+    Returns (leaf_name, container_name_or_None) where container is the part
+    immediately preceding the leaf when the symbol is dotted.
+    """
+    parts = [p for p in (symbol or "").split(".") if p]
+    if not parts:
+        return "", None
+    leaf = parts[-1]
+    container = parts[-2] if len(parts) >= 2 else None
+    return leaf, container
+
+
+def _symbol_in_known(symbol: str, known: list[str]) -> bool:
+    """Does `symbol` appear in the skeleton's known_symbols list?
+
+    Accepts:
+      - exact match
+      - container match for dotted symbols (e.g. 'TextChoices.__str__' counts
+        as present when 'TextChoices' is a known class).
+    """
+    if not symbol or not known:
+        return False
+    if symbol in known:
+        return True
+    leaf, container = _symbol_name_parts(symbol)
+    if leaf and any(k == leaf or k.endswith("." + leaf) for k in known):
+        return True
+    if container and any(k == container or k.endswith("." + container) for k in known):
+        return True
+    return False
+
+
+def _grep_symbol_location(
+    cid: str, symbol: str, all_files: list[str], *, timeout: int = 30,
+) -> list[str]:
+    """Repo-wide grep for the symbol's definition site.
+
+    v12 A strategy (tiered):
+      1. For dotted symbols (``Class.method``), grep first for the **class**
+         name only — the class's module is the strongest signal. Method
+         names like ``__str__`` / ``resolve`` / ``process`` match hundreds
+         of unrelated files and would be noise.
+      2. If tier-1 yields no matches, fall back to grepping the leaf
+         name (``def leaf``). This is the standalone-function case.
+
+    Filters out test paths; caps at ``_MAX_SYMBOL_GREP_HITS``.
+    """
+    leaf, container = _symbol_name_parts(symbol)
+    if not leaf:
+        return []
+
+    def _run(pattern: str) -> list[str]:
+        cmd = (
+            rf"grep -rln --include='*.py' -E '{pattern}' /testbed"
+        )
+        try:
+            r = docker_exec_login(cid, cmd, timeout=timeout)
+        except Exception:
+            return []
+        if r.returncode not in (0, 1):
+            return []
+        out: list[str] = []
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if line.startswith("/testbed/"):
+                line = line[len("/testbed/"):]
+            if line in all_files and not _is_test_path(line) and line not in out:
+                out.append(line)
+        return out
+
+    # Tier 1: class-definition search (for dotted symbols only)
+    if container:
+        hits = _run(rf"^[[:space:]]*class[[:space:]]+{container}[[:space:]]*[\(:]")
+        if hits:
+            return hits[:_MAX_SYMBOL_GREP_HITS]
+
+    # Tier 2: leaf-name definition (standalone function / top-level class)
+    hits = _run(
+        rf"^[[:space:]]*(class|(async[[:space:]]+)?def)[[:space:]]+{leaf}[[:space:]]*[\(:]"
+    )
+    # For very common leaves (short names), likely too many hits; drop if >20.
+    if len(hits) > 20:
+        return []
+    return hits[:_MAX_SYMBOL_GREP_HITS]
 
 
 @dataclass
@@ -30,7 +133,8 @@ class Localization:
     test_file: str | None = None
     test_is_new: bool = False
     test_confidence: str = "low"
-    focal_file: str | None = None
+    focal_file: str | None = None           # primary (= focal_files[0] when present)
+    focal_files: list[str] = field(default_factory=list)  # up to 3, primary first
     focal_symbol: str | None = None
     focal_kind: str | None = None  # function|method|class
     import_path: str | None = None
@@ -141,18 +245,30 @@ def _localize_with_cid(issue: IssueBundle, cid: str) -> Localization:
         logger.debug("localize_test_file: no parsed output (%s)", resp.error)
 
     # ----- Call 2: focal function -----
-    # Pick focal file: the first affected_module that resolves to a repo path; else fall back to test_file's sibling.
-    focal_path = _choose_focal_file(issue, all_files)
-    if focal_path is None and loc.test_file and loc.test_file in all_files:
-        focal_path = loc.test_file
+    # Pick up to _MAX_FOCAL_FILES focal files (primary first); fall back to
+    # test_file's sibling when none of the affected modules resolve.
+    focal_paths = _choose_focal_files(issue, all_files, max_files=_MAX_FOCAL_FILES)
+    if not focal_paths and loc.test_file and loc.test_file in all_files:
+        focal_paths = [loc.test_file]
 
-    if focal_path is None:
+    if not focal_paths:
         loc.error = "no_focal_file_candidate"
         return loc
 
-    source = _fetch_file_source(cid, focal_path)
-    skeleton = build_file_skeleton(source) if source else "(unavailable)"
-    known_symbols = list_symbols(source)
+    focal_path = focal_paths[0]
+    loc.focal_files = focal_paths
+    # Build skeleton and known-symbol list over all picked files so the LLM
+    # can reach for the right symbol even when it lives in a sibling file.
+    skeleton_parts: list[str] = []
+    known_symbols: list[str] = []
+    for fp in focal_paths:
+        src = _fetch_file_source(cid, fp)
+        if not src:
+            continue
+        sk = build_file_skeleton(src) or "(unavailable)"
+        skeleton_parts.append(f"# File: {fp}\n{sk}")
+        known_symbols.extend(list_symbols(src))
+    skeleton = "\n\n".join(skeleton_parts) if skeleton_parts else "(unavailable)"
 
     focal_spec = load_prompt("localize_focal")
     fctx = dict(
@@ -185,6 +301,31 @@ def _localize_with_cid(issue: IssueBundle, cid: str) -> Localization:
                 loc.repair_details["focal_symbol"] = {"from": raw_symbol, "to": repaired_sym}
         loc.import_path = raw_import
         loc.focal_file = focal_path
+
+        # v12 A: symbol-aware focal verification. If the LLM-picked symbol
+        # is not actually defined in any of the candidate focal files, grep
+        # the repo for the symbol's class/function line and promote the
+        # matching file to focal_files[0]. This fixes the common case where
+        # affected_modules maps to a re-export __init__.py while the symbol
+        # lives in a submodule (django-11964), or where the localizer
+        # committed to a wrong module entirely (django-12304).
+        if loc.focal_symbol and not _symbol_in_known(loc.focal_symbol, known_symbols):
+            hits = _grep_symbol_location(cid, loc.focal_symbol, all_files)
+            if hits:
+                old_focal = loc.focal_file
+                new_paths = hits + [p for p in focal_paths if p not in hits]
+                loc.focal_files = new_paths[:_MAX_FOCAL_FILES]
+                loc.focal_file = hits[0]
+                loc.import_path = _path_to_import(hits[0])
+                loc.repaired_filenames.append(
+                    f"focal_file_symbol_promoted: {old_focal} -> {hits[0]}"
+                )
+                loc.repair_details["focal_symbol_promoted"] = {
+                    "symbol": loc.focal_symbol,
+                    "from": old_focal,
+                    "to": hits[0],
+                    "grep_hits": hits,
+                }
     else:
         loc.focal_file = focal_path
         loc.import_path = _path_to_import(focal_path)
@@ -199,36 +340,102 @@ def _localize_with_cid(issue: IssueBundle, cid: str) -> Localization:
     return loc
 
 
-def _choose_focal_file(issue: IssueBundle, all_files: list[str]) -> str | None:
-    """Resolve a focal file from the issue's affected_modules / traceback."""
+def _choose_focal_files(
+    issue: IssueBundle,
+    all_files: list[str],
+    *,
+    max_files: int = _MAX_FOCAL_FILES,
+) -> list[str]:
+    """Resolve up to ``max_files`` focal files from issue.affected_modules / traceback.
+
+    Ordered by confidence: direct .py hits first, module-to-path mappings next,
+    traceback ``File "..."`` mentions after, then rapidfuzz-repaired affected
+    modules as a last resort. Deduplicates while preserving insertion order and
+    caps at ``max_files`` to bound prompt size.
+
+    v12 C: filter test paths out of the primary result list. If the filter
+    empties everything, fall back to including test paths (with caller aware
+    of the weaker signal via `_is_test_path`).
+    """
+    found: list[str] = []
+
+    def _add(path: str | None) -> bool:
+        """Append if new and non-test; return True when we've hit the cap."""
+        if path and path not in found and not _is_test_path(path):
+            found.append(path)
+        return len(found) >= max_files
+
     candidates: list[str] = []
+    # 1) Direct .py matches in affected_modules
     for mod in issue.affected_modules:
         m = mod.strip()
         if not m:
             continue
         if m.endswith(".py") and m in all_files:
-            return m
-        candidates.append(m)
-    # Try mapping "a.b.c" → "a/b/c.py"
+            if _add(m):
+                return found
+        else:
+            candidates.append(m)
+
+    # 2) Module-to-path mapping ("a.b.c" → "a/b/c.py", optionally under "src/")
+    # v12 B: prefer "a/b/c.py" over "a/b/c/__init__.py" when both exist.
     for mod in candidates:
         path = mod.replace(".", "/") + ".py"
+        init_path = mod.replace(".", "/") + "/__init__.py"
+        src_path = f"src/{path}"
+        src_init = f"src/{init_path}"
         if path in all_files:
-            return path
-        if f"src/{path}" in all_files:
-            return f"src/{path}"
-    # Traceback: look for File "<path>"
+            if _add(path):
+                return found
+        elif src_path in all_files:
+            if _add(src_path):
+                return found
+        elif init_path in all_files:
+            if _add(init_path):
+                return found
+        elif src_init in all_files:
+            if _add(src_init):
+                return found
+
+    # 3) Traceback: look for File "<path>"
     if issue.traceback:
         import re as _re
         for m in _re.finditer(r'File "([^"]+\.py)"', issue.traceback):
             p = m.group(1)
-            # make relative to /testbed
             if "/testbed/" in p:
                 p = p.split("/testbed/", 1)[1]
             if p in all_files:
-                return p
-    # Last resort: first affected module repaired
+                if _add(p):
+                    return found
+
+    # 4) Last resort: repaired affected modules
     for mod in candidates:
-        repaired, changed, score = _repair(mod, all_files)
+        repaired, changed, _score = _repair(mod, all_files)
         if changed:
-            return repaired
-    return None
+            if _add(repaired):
+                return found
+
+    # v12 C: if strict filtering left us empty, fall back to including test
+    # paths. Caller's downstream logic (symbol verification) can still
+    # promote a non-test source file via `_grep_symbol_location`.
+    if not found:
+        for mod in issue.affected_modules:
+            m = mod.strip()
+            if m.endswith(".py") and m in all_files and m not in found:
+                found.append(m)
+                if len(found) >= max_files:
+                    break
+        for mod in candidates:
+            if len(found) >= max_files:
+                break
+            path = mod.replace(".", "/") + ".py"
+            if path in all_files and path not in found:
+                found.append(path)
+
+    return found
+
+
+def _choose_focal_file(issue: IssueBundle, all_files: list[str]) -> str | None:
+    """Backward-compatible wrapper returning just the primary focal file."""
+    paths = _choose_focal_files(issue, all_files, max_files=1)
+    return paths[0] if paths else None

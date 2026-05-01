@@ -17,7 +17,7 @@ from sieve.repro.localize import Localization, localize
 
 logger = logging.getLogger("sieve.repro.cache")
 
-PHASE_A_SCHEMA_VERSION = "2b.phaseA.v1"
+PHASE_A_SCHEMA_VERSION = "2b.phaseA.v10"
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CACHE_DIR = _REPO_ROOT / "runs" / "phase_a_cache"
@@ -128,7 +128,7 @@ def phase_a(
     force: bool = False,
     cache_dir: Path | None = None,
     n_samples_per_mask: int = 2,
-    temperature: float = 0.5,
+    temperature: float = 1.0,
     gate_timeout: int = 60,
 ) -> PhaseACache:
     """Run Phase A (generate + gate) for an instance, with on-disk caching."""
@@ -179,9 +179,10 @@ def phase_a(
             loc,
             n_samples_per_mask=n_samples_per_mask,
             temperature=temperature,
+            repo=instance.get("repo", ""),
         )
 
-        # 4) Gate candidates on the unpatched repo
+        # 4) Gate candidates on the unpatched repo.
         gated = gate_candidates(
             instance,
             candidates,
