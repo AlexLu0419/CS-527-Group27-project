@@ -2,43 +2,13 @@
 
 SIEVE is a cascading verifier for SWE-agent-generated patches. Given an issue and a
 candidate patch, it runs a four-layer cascade — **static → regression → reproduction →
-judge** — and emits a single final verdict (`PASS`, `FAIL`, or `UNCERTAIN`). The repo
-also ships a **self-evolution loop** that classifies the verifier's own mistakes on a
-labeled slice, points at which prompt/rubric/threshold to edit, and validates the edit
-before the change is kept.
+judge** — and emits a single final verdict (`PASS`, `FAIL`, or `UNCERTAIN`). FAIL and
+UNCERTAIN instances are then re-run with synthesized feedback (the **retry pass**),
+re-merged with the first-run preds, and evaluated against SWE-bench ground truth.
 
-The historical patch set under evaluation lives in `runs/swe-verified_50_gemini-2.5-pro/`
-(50-instance SWE-bench Verified subset). The vendored `mini-swe-agent/` is the external
-patch author used to generate new patches; SIEVE itself never writes code.
-
----
-
-## Repository layout
-
-```
-.
-├── configs/models.json             # single source of truth for LLM role → model mapping
-├── data/                           # 50-instance SWE-bench Verified ID list
-├── docs/                           # design notes (v2/v3 plans, refined ideas, prompt pack)
-├── mini-swe-agent/                 # vendored external patch-author agent
-├── runs/                           # cached artifacts & results (gitignored in practice)
-│   ├── evolution/                  # slice_manifest.json, per-cycle cascade runs
-│   ├── phase_a_cache/              # patch-blind reproduction-test cache (auto-created)
-│   ├── static_checks_validation/
-│   ├── dynamic_regression_validation/
-│   ├── swe-verified_50_gemini-2.5-pro/   # preds.json under evaluation
-│   └── sb-cli-reports/             # ground-truth labels
-├── scripts/                        # entrypoints: validators, runner, evolution tools
-├── sieve/
-│   ├── llm/          # litellm client, role resolution, cache, dry-run stub
-│   ├── phases/       # static, dynamic (regression), reproduction, judge
-│   ├── repro/        # Phase A/B: localize, generate, skeleton, runner, feedback, gate
-│   ├── judge/        # rubric assembly, strip, aggregation
-│   ├── evolution/    # versions, classify, report
-│   ├── prompts/      # Jinja2 YAML prompts + ARTIFACT_VERSIONS.json
-│   └── utils/        # SWE-bench dataset helpers
-└── tests/
-```
+The 50-instance SWE-bench Verified subset under evaluation is enumerated in
+`data/instance_ids.json`. The vendored `mini-swe-agent/` is the external patch author
+that produces preds.json files; SIEVE itself never writes patches.
 
 ---
 
@@ -59,364 +29,391 @@ uv sync
 
 ### API keys
 
-SIEVE talks to LLM providers via `litellm`. Only OpenAI and Gemini are used:
-
 ```bash
 export OPENAI_API_KEY=...
 export GEMINI_API_KEY=...
 ```
 
-`configs/models.json` declares *which* env var each provider expects; the secret itself
-stays in the environment.
+`configs/models.json` declares which env var each provider expects; the secret stays in
+the environment.
 
 ---
 
 ## Model configuration (`configs/models.json`)
 
-Single source of truth for every LLM role in the cascade and for the mini-swe-agent
-patch author. The file is checked in — no secrets, only identifiers.
+Single source of truth for every LLM role. The current mapping:
 
-```json
-{
-  "sieve_roles": {
-    "localize": "gemini/gemini-2.5-flash",
-    "generate": "openai/gpt-5-mini",
-    "feedback": "gemini/gemini-2.5-flash",
-    "judge":    "gemini/gemini-2.5-pro"
-  },
-  "mini_swe_agent": "openai/gpt-5-mini",
-  "providers": {
-    "openai": {"env_var": "OPENAI_API_KEY"},
-    "gemini": {"env_var": "GEMINI_API_KEY"}
-  },
-  "env_overrides": {
-    "localize": "SIEVE_MODEL_LOCALIZE",
-    "generate": "SIEVE_MODEL_GENERATE",
-    "feedback": "SIEVE_MODEL_FEEDBACK",
-    "judge":    "SIEVE_MODEL_JUDGE"
-  }
-}
-```
+| Role        | Model                       | Why |
+|-------------|-----------------------------|-----|
+| `localize`  | `gemini/gemini-2.5-pro`     | Phase A localization. |
+| `generate`  | `openai/gpt-5-mini`         | Phase A reproduction-test generation. |
+| `feedback`  | `gemini/gemini-2.5-pro`     | Per-bucket failure-mode synthesis (FAIL paths). |
+| `judge`     | `gemini/gemini-2.5-pro`     | Cross-family judge for UNCERTAIN cases. |
+| `mini_swe_agent` | `openai/gpt-5-mini`    | First-run + retry patch author. |
 
-**Resolution precedence** (see `sieve/llm/roles.py`):
-
-1. Explicit argument to `resolve_model(role, override=...)`
-2. Per-role env var (`SIEVE_MODEL_LOCALIZE`, etc.)
-3. JSON entry under `sieve_roles`
-4. Hardcoded fallback in `roles.py` (same defaults as the JSON)
-
-**Role rationale**
-
-| Role | Model | Why |
-|---|---|---|
-| `localize` | `gemini/gemini-2.5-flash` | Cheap, JSON-mode reliable, called 3× per instance. |
-| `generate` | `openai/gpt-5-mini` | Must not exceed the weakest agent under test; Phase A is patch-blind, so same-family risk is low. |
-| `feedback` | `gemini/gemini-2.5-flash` | Nuanced failure-mode articulation on FAIL paths only. |
-| `judge`    | `gemini/gemini-2.5-pro`  | Highest-stakes decision; cross-family against GPT-5-mini patch author minimizes self-eval bias. |
+Override any role at runtime with `SIEVE_MODEL_<ROLE>=...` (see
+`sieve/llm/roles.py`). The file is checked in — no secrets, only identifiers.
 
 ---
 
-## The SIEVE cascade
-
-`sieve/phases/` implements four layers, chained by `scripts/run_sieve_v0.py`:
+## The cascade
 
 ```
-             ┌────────────────────────────────────────────────┐
-patch ──▶  L1 static  ──REJECT──▶ FAIL                         │
-             │PASS/FLAG                                         │
-             ▼                                                  │
-           L2a regression ──REJECT──▶ FAIL                      │
-             │PASS                                              │
-             ▼                                                  │
-           L2b reproduction                                     │
-             ├─ PASS / FAIL ─────────────────────▶ final        │
-             ├─ UNCERTAIN_ZERO_SIGNAL ─────────▶ UNCERTAIN      │
-             └─ UNCERTAIN                                       │
-                │                                               │
-                ▼                                               │
-              L3 judge ──aggregate──▶ PASS | FAIL | UNCERTAIN ◀┘
+patch ──▶  L1 static ──REJECT──▶ FAIL
+            │PASS
+            ▼
+          L2a regression ──REJECT──▶ FAIL
+            │PASS
+            ▼
+          L2b reproduction
+            ├─ PASS ─────────────────▶ PASS (final)
+            ├─ FAIL ─────────────────▶ FAIL (final)
+            ├─ UNCERTAIN_ZERO_SIGNAL ─▶ UNCERTAIN (final)
+            └─ UNCERTAIN
+                  │
+                  ▼
+                L3 judge ──aggregate──▶ PASS | FAIL | UNCERTAIN
 ```
 
-**L1 static** (`sieve/phases/static.py`) — `check_patch_applies`, `check_files_parse`,
-`check_lint_delta` (flake8 + semgrep). Deterministic, no LLM.
+- **L1 static** ([sieve/phases/static.py](sieve/phases/static.py)) — single check:
+  `git apply --check` (dry-run, no disk modification). Heavyweight static checks
+  (flake8 lint-delta, ast.parse, semgrep) were removed because they added no signal
+  beyond the cheap apply check.
+- **L2a regression** ([sieve/phases/dynamic.py](sieve/phases/dynamic.py)) — applies
+  the patch and runs the instance's `PASS_TO_PASS` tests once on the patched repo.
+  Any failure is a hard REJECT. Pre-patch baseline is not run (PASS_TO_PASS is
+  guaranteed green on the un-patched repo by the SWE-bench dataset definition).
+- **L2b reproduction** ([sieve/phases/reproduction.py](sieve/phases/reproduction.py),
+  [sieve/repro/](sieve/repro/)) — Phase A (patch-blind) uses `localize` → `generate`
+  to produce reproduction-test candidates per mask skeleton. Phase B runs each gated
+  candidate against the patched container and computes a weighted vote across A/B/C
+  buckets.
+- **L3 judge** ([sieve/phases/judge.py](sieve/phases/judge.py),
+  [sieve/judge/](sieve/judge/)) — fires only on UNCERTAIN from L2b. A 4-item rubric
+  prompt produces per-criterion scores; `aggregate()` combines them with the repro
+  signal into the final verdict.
 
-**L2a regression** (`sieve/phases/dynamic.py`) — runs the instance's `PASS_TO_PASS` tests
-in the SWE-bench Docker harness; any regression is a hard REJECT.
+### Retry inclusion semantics
 
-**L2b reproduction** (`sieve/phases/reproduction.py`, `sieve/repro/`) — Phase A (patch-
-blind) uses `localize` → `generate` to produce 2 reproduction test candidates per mask
-skeleton (raw / traceback-first / snippet-first). Phase B runs each candidate pre- and
-post-patch inside Docker; on per-bucket FAIL, `feedback` synthesizes a failure-mode
-triple that feeds the next generation attempt (`sieve/repro/gate.py`).
+A single retry roster covers every instance whose final cascade verdict is
+anything other than a clean PASS. The selection rule is:
 
-**L3 judge** (`sieve/phases/judge.py`, `sieve/judge/`) — fires only on `UNCERTAIN` from
-L2b. A rubric prompt (`sieve/prompts/judge_patch.yaml`) produces per-criterion scores;
-`aggregate()` combines them with the repro score into the final verdict.
+> retry iff the final cascade verdict ≠ PASS
 
-**Artifact versioning** — every prompt YAML has a `sha256` content hash in
-`sieve/prompts/ARTIFACT_VERSIONS.json`. Each per-instance result records the
-`layer_snapshots` dict, so we can always tell which prompt version produced which
-verdict. Edit a prompt → version bumps → snapshot diverges → evolution delta is
-attributable.
+| Layer outcome                                    | Final cascade | Retried? |
+|--------------------------------------------------|---------------|----------|
+| static REJECT                                    | FAIL          | yes      |
+| static ERROR (incl. empty patch via `error` field) | ERROR       | yes      |
+| regression REJECT                                | FAIL          | yes      |
+| regression ERROR / SKIP+`error`                  | ERROR         | yes      |
+| reproduction FAIL                                | FAIL          | yes      |
+| reproduction ERROR                               | ERROR         | yes      |
+| repro UNCERTAIN → judge FAIL                     | FAIL          | yes      |
+| repro UNCERTAIN → judge UNCERTAIN                | UNCERTAIN     | yes      |
+| repro UNCERTAIN → judge PASS                     | PASS          | no       |
+| no validator row at all (harness-error / not run)| MISSING       | yes      |
+| reproduction PASS                                | PASS          | no       |
+
+Empty patches surface as ERROR at the static layer; harness-error IDs
+(skipped by every validator) surface as MISSING. Both flow through the same
+retry path — there is no separate rescue roster.
 
 ---
 
-## Running the cascade
+## End-to-end runbook
 
-### Single instance, dry-run
+The pipeline is a sequence of independent scripts that read each other's JSON
+outputs. Run them in this order. Defaults below assume the canonical
+gpt-5-mini run; pass `--preds` / `--gt` / `--output-dir` to retarget.
 
-No Docker or LLM calls; uses `sieve/llm/dry_run.py` stubs. Useful for config / import
-sanity checks.
-
-```bash
-SIEVE_DRY_RUN=1 uv run python scripts/run_sieve_v0.py \
-    --manifest runs/evolution/slice_manifest.json \
-    --split evolution \
-    --only django__django-11815 \
-    --out /tmp/smoke.json
-```
-
-### Full offline cascade on the evolution slice
-
-Needs Docker running + real API keys.
+### 1. Generate first-run patches with mini-swe-agent
 
 ```bash
-uv run python scripts/run_sieve_v0.py \
-    --manifest runs/evolution/slice_manifest.json \
-    --split evolution \
-    --out runs/evolution/sieve_v0_evolution_results.json \
-    --reuse-static --reuse-regression
-```
+FILTER=$(python3 -c "import json; print('|'.join(json.load(open('data/instance_ids.json'))['instance_ids']))")
 
-Flags:
-
-| Flag | Meaning |
-|---|---|
-| `--manifest` | Slice manifest from `scripts/build_evolution_slice.py`; omit to run all labeled instances. |
-| `--split` | `evolution` (35), `held_out` (10), or `all`. |
-| `--reuse-static` / `--reuse-regression` | Load cached verdicts from `runs/*_validation/results.json` instead of recomputing. |
-| `--only` | Comma-separated instance IDs to whitelist. |
-| `--resume` | Skip instance IDs already present in `--out`. |
-
-The output JSON is a list of per-instance records: `layers.{static,regression,reproduction,judge}`
-sub-verdicts, `final_verdict`, `final_source`, and the `layer_snapshots` fingerprint.
-
----
-
-## Per-layer validation scripts
-
-Each validator runs one layer in isolation against the 50-instance benchmark and drops a
-results JSON under `runs/<name>_validation/`. These are how you re-materialize the
-caches that `run_sieve_v0.py` consumes.
-
-| Script | What it validates |
-|---|---|
-| `scripts/validate_static_checks.py`   | L1 static on all candidate patches. |
-| `scripts/validate_semgrep.py`         | Semgrep rules independently of the static layer. |
-| `scripts/validate_dynamic_regression.py` | L2a regression-only. |
-| `scripts/validate_dynamic_checks.py`  | L2a + L2b dynamic checks together. |
-| `scripts/validate_reproduction.py`    | L2b reproduction (Phase A+B) end-to-end. |
-| `scripts/validate_judge.py`           | L3 judge rubric on a pre-selected UNCERTAIN set. |
-
-All validators accept `--help`. Typical invocation:
-
-```bash
-uv run python scripts/validate_static_checks.py \
-    --preds runs/swe-verified_50_gemini-2.5-pro/swe_verified_50_gemini-2.5-pro-new/preds.json \
-    --out runs/static_checks_validation/results.json
-```
-
----
-
-## Self-evolution workflow
-
-Each cycle walks the verifier through: **run → classify its own errors → generate a
-repair report → (human) edit the prompt → validate the delta**.
-
-### 1. Build the slice manifest (one-time, seeded, reproducible)
-
-```bash
-uv run python scripts/build_evolution_slice.py --seed 42 --holdout 10
-# → runs/evolution/slice_manifest.json  (35 evolution + 10 held-out, stratified)
-```
-
-### 2. Run the cascade on the evolution split
-
-See *Full offline cascade* above; output lives at
-`runs/evolution/sieve_v0_evolution_results.json`.
-
-### 3. Classify errors and generate a repair report
-
-`sieve/evolution/classify.py` implements the v3 §5.2 rule table: each mis-verdict is
-bucketed as `false_pass` / `false_fail` / `uncertain_leakage` with an
-`artifact_edit_hint` pointing at a specific prompt/rubric/threshold.
-`sieve/evolution/report.py` groups buckets by hint and writes a Markdown report.
-
-```bash
-uv run python -c "
-from pathlib import Path
-import json
-from sieve.evolution.classify import classify_errors
-from sieve.evolution.report import build_report
-
-records = json.loads(Path('runs/evolution/sieve_v0_evolution_results.json').read_text())
-buckets = classify_errors(records)
-manifest = json.loads(Path('runs/evolution/slice_manifest.json').read_text())
-build_report(buckets, manifest, Path('runs/evolution/report_cycle1.md'), cycle=1)
-"
-```
-
-### 4. Edit the pointed-at artifact
-
-Open the YAML named in the report's `artifact_edit_hint` (e.g. `mask_traceback_first`,
-`judge_patch`, `feedback_synth`). Make one targeted change. The content hash in
-`ARTIFACT_VERSIONS.json` must be re-computed — the harness does this on load, so the
-next cascade run records the new snapshot automatically.
-
-### 5. Validate the delta before keeping the edit
-
-```bash
-uv run python scripts/validate_evolution_delta.py \
-    --baseline-sha <pre-edit commit> \
-    --candidate-sha HEAD \
-    --manifest runs/evolution/slice_manifest.json
-```
-
-The script spawns a detached git worktree at the baseline SHA, reruns `run_sieve_v0.py`
-on *both* splits at both refs, and applies the acceptance rule:
-
-> `held_out_accuracy(v1) > v0  AND  evolution_accuracy(v1) ≥ v0 − 0.02`
-
-If the candidate fails, the script prints (but does **not** auto-run) a revert command.
-
----
-
-## Running mini-swe-agent (generate new patches)
-
-The vendored agent in `mini-swe-agent/` is used to produce patches under `runs/`, which
-SIEVE then evaluates. Its model comes from `configs/models.json::mini_swe_agent`, which
-is wired into `mini-swe-agent/src/minisweagent/config/benchmarks/swebench.yaml` (and
-`swebench_backticks.yaml`).
-
-### Install
-
-```bash
 cd mini-swe-agent
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+python -m minisweagent.run.benchmarks.swebench \
+    --subset verified --split test \
+    --filter "^($FILTER)$" \
+    --output ../runs/swe-verified_50_gpt5-mini \
+    -m openai/gpt-5-mini \
+    -w 2
 cd ..
 ```
 
-### Run on the 50-instance subset
+`-w 2` is the harness concurrency cap (set in
+[~/.claude/.../memory/feedback_harness_serial.md](memory pin)).
+
+Output: `runs/swe-verified_50_gpt5-mini/preds.json`.
+
+### 2. Get ground-truth labels
+
+Local (recommended):
 
 ```bash
-FILTER=$(python3 -c "
-import json
-ids = json.load(open('data/instance_ids.json'))['instance_ids']
-print('|'.join(ids))
-")
-
-python -m minisweagent.run.benchmarks.swebench \
-    --subset verified \
-    --split test \
-    --filter "^($FILTER)$" \
-    --output runs/swe-verified_50_gpt5-mini \
-    -m openai/gpt-5-mini \
-    -w 2
-```
-
-| Flag | Description |
-|---|---|
-| `--subset verified` | `princeton-nlp/SWE-Bench_Verified` from HuggingFace. |
-| `--filter` | Regex to select the 50 instances in `data/instance_ids.json`. |
-| `--output` | Destination for trajectories + `preds.json`. |
-| `-m` | Model name (litellm); default matches `configs/models.json`. |
-| `-w` | Parallel Docker workers. `2` is the sweet spot for cost/rate limits. |
-
-### Resuming a partial run
-
-```bash
-python3 -c "
-import json, yaml
-all_ids = set(json.load(open('data/instance_ids.json'))['instance_ids'])
-statuses = yaml.safe_load(open('runs/swe-verified_50_gpt5-mini/exit_statuses_*.yaml'))
-submitted = set(statuses['instances_by_exit_status'].get('Submitted', []))
-print('|'.join(sorted(all_ids - submitted)))
-"
-```
-
-Rerun with that filter and the same `--output`; already-submitted instances are skipped
-via `preds.json`.
-
-### Evaluating the resulting patches against SWE-bench ground truth
-
-Local:
-
-```bash
-pip install swebench
 python -m swebench.harness.run_evaluation \
     --dataset_name princeton-nlp/SWE-bench_Verified \
     --predictions_path runs/swe-verified_50_gpt5-mini/preds.json \
-    --max_workers 4 \
-    --run_id gpt5-mini-run
+    --max_workers 2 \
+    --run_id gpt5-mini-firstrun
 ```
 
-Cloud (no Docker):
+Drop the resulting report under `runs/sb-cli-reports/` (or wherever you point
+`--gt` at later). The report contains `resolved_ids` / `unresolved_ids` /
+`error_ids` / `empty_patch_ids`.
+
+### 3. Layer 1 — static (`git apply --check`)
 
 ```bash
-pip install sb-cli
-sb-cli submit swe-bench_verified test \
-    --predictions_path runs/swe-verified_50_gpt5-mini/preds.json \
-    --run_id gpt5-mini-run
+uv run python scripts/validate_static_checks.py \
+    --preds runs/swe-verified_50_gpt5-mini/preds.json \
+    --gt runs/sb-cli-reports/<your-firstrun-report>.json \
+    --output-dir runs/static_checks_validation_gpt5mini
 ```
 
-Report JSON lands in `runs/sb-cli-reports/`; the 50-instance ground-truth labels live
-there and are what SIEVE compares against.
+Output: `results.json`, `summary.json`. One sub-check per row:
+`check_patch_applies` ∈ {PASS, REJECT, ERROR}.
+
+### 4. Layer 2a — regression (PASS_TO_PASS, post-patch only)
+
+```bash
+uv run python scripts/validate_dynamic_regression.py \
+    --preds runs/swe-verified_50_gpt5-mini/preds.json \
+    --gt runs/sb-cli-reports/<your-firstrun-report>.json \
+    --output-dir runs/dynamic_regression_validation_gpt5mini \
+    --resume
+```
+
+`--resume` skips already-completed rows.
+
+### 5. (Optional) Phase A pilot
+
+If you want to inspect Phase A bucket counts before committing full Phase B
+budget:
+
+```bash
+uv run python scripts/run_phase_a_only.py \
+    --preds runs/swe-verified_50_gpt5-mini/preds.json
+```
+
+Phase A artifacts land in `runs/phase_a_cache/<fingerprint>.json`; Phase B
+(step 6) reads the same cache, so this step is purely informational.
+
+### 6. Layer 2b — reproduction (Phase A + Phase B)
+
+```bash
+uv run python scripts/validate_reproduction.py \
+    --preds runs/swe-verified_50_gpt5-mini/preds.json \
+    --gt runs/sb-cli-reports/<your-firstrun-report>.json \
+    --output-dir runs/reproduction_validation_gpt5mini \
+    --resume
+```
+
+Output verdict per row: PASS | FAIL | UNCERTAIN | UNCERTAIN_ZERO_SIGNAL | ERROR.
+
+### 7. Layer 3 — judge (UNCERTAIN bucket only)
+
+```bash
+uv run python scripts/validate_judge.py \
+    --preds runs/swe-verified_50_gpt5-mini/preds.json \
+    --repro runs/reproduction_validation_gpt5mini/results.json \
+    --output-dir runs/judge_validation_gpt5mini \
+    --resume
+```
+
+The judge is invoked only for instances whose reproduction verdict is UNCERTAIN
+or UNCERTAIN_ZERO_SIGNAL.
+
+### 8. Cascade confusion matrix
+
+```bash
+uv run python scripts/cascade_matrix.py \
+    --static  runs/static_checks_validation_gpt5mini/results.json \
+    --dynreg  runs/dynamic_regression_validation_gpt5mini/results.json \
+    --repro   runs/reproduction_validation_gpt5mini/results.json \
+    --judge   runs/judge_validation_gpt5mini/results.json \
+    --gt      runs/sb-cli-reports/<your-firstrun-report>.json \
+    --label   "first-run cascade"
+```
+
+Prints TP/FP/TN/FN/UNCERTAIN counts and lists the FP/FN instances.
+
+### 9. Pre-cache focal snippets (used by retry feedback)
+
+```bash
+uv run python scripts/extract_focal_snippets.py
+```
+
+Caches Docker-extracted focal-file snippets to `runs/focal_snippets_cache/{iid}.json`.
+The retry-manifest builder reads these without needing Docker.
+
+### 10. Build the retry feedback manifest
+
+The manifest covers every instance whose final cascade verdict isn't PASS
+(see *Retry inclusion semantics* above). Empty patches and harness-error IDs
+are included automatically.
+
+```bash
+uv run python scripts/build_retry_manifest.py \
+    --static  runs/static_checks_validation_gpt5mini/results.json \
+    --dynreg  runs/dynamic_regression_validation_gpt5mini/results.json \
+    --repro   runs/reproduction_validation_gpt5mini/results.json \
+    --judge   runs/judge_validation_gpt5mini/results.json \
+    --preds   runs/swe-verified_50_gpt5-mini/preds.json \
+    --output-dir runs/retry_gpt5mini
+```
+
+Outputs:
+- `runs/retry_gpt5mini/feedback_manifest.json` — per-instance feedback text
+  (prior patch + static block + regression block + reproduction block; **judge
+  output is intentionally excluded** from the feedback to avoid over-committing
+  the retry agent). For ERROR/MISSING layers, the corresponding block reports
+  the error or "MISSING (no record for this instance)".
+- `runs/retry_gpt5mini/retry_filter.txt` — anchored regex to feed mini-swe-agent.
+
+### 11. Re-run mini-swe-agent on the retry filter
+
+```bash
+cd mini-swe-agent
+python -m minisweagent.run.benchmarks.swebench \
+    --subset verified --split test \
+    --filter "$(cat ../runs/retry_gpt5mini/retry_filter.txt)" \
+    --feedback-manifest ../runs/retry_gpt5mini/feedback_manifest.json \
+    --output ../runs/retry_gpt5mini_preds \
+    -m openai/gpt-5-mini \
+    -w 2
+cd ..
+```
+
+### 12. Merge first-run + retry preds
+
+```bash
+uv run python scripts/merge_retry_preds.py \
+    --first-run runs/swe-verified_50_gpt5-mini/preds.json \
+    --retry     runs/retry_gpt5mini_preds/preds.json \
+    --out       runs/merged_preds_gpt5mini.json
+```
+
+The retry layer only replaces an entry when its `model_patch` is non-empty —
+empty / failed retry preds fall back to the first-run patch.
+
+### 13. Evaluate the merged preds against SWE-bench
+
+```bash
+python -m swebench.harness.run_evaluation \
+    --dataset_name princeton-nlp/SWE-bench_Verified \
+    --predictions_path runs/merged_preds_gpt5mini.json \
+    --max_workers 2 \
+    --run_id gpt5-mini-merged
+```
+
+### 14. Pipeline report (cost + layer pass-through)
+
+```bash
+uv run python scripts/v15_pipeline_report.py \
+    --since         <unix-timestamp-of-pipeline-start> \
+    --retry-dir     runs/retry_gpt5mini \
+    --retry-preds-dir runs/retry_gpt5mini_preds \
+    --repro-results runs/reproduction_validation_gpt5mini/results.json \
+    --harness-report runs/local_eval/<your-merged-report>.json \
+    --out           docs/<your-report>.md
+```
+
+Aggregates LLM token spend (from `runs/llm_log/*.jsonl`) plus mini-swe-agent
+costs (from per-instance `traj.json`) and renders a Markdown report with the
+cost table, per-layer verdict counts, and final cascade-vs-harness numbers.
+
+---
+
+## Per-layer validator reference
+
+All validators are independent and idempotent. Each writes
+`results.json` + `summary.json` under its `--output-dir`.
+
+| Script | Layer | Output dir (default) |
+|---|---|---|
+| [scripts/validate_static_checks.py](scripts/validate_static_checks.py) | L1 static (git apply --check) | `runs/static_checks_validation/` |
+| [scripts/validate_dynamic_regression.py](scripts/validate_dynamic_regression.py) | L2a regression (PASS_TO_PASS) | `runs/dynamic_regression_validation/` |
+| [scripts/validate_reproduction.py](scripts/validate_reproduction.py) | L2b reproduction (Phase A+B) | `runs/reproduction_validation/` |
+| [scripts/validate_reproduction_with_cache_dir.py](scripts/validate_reproduction_with_cache_dir.py) | L2b against a fixed Phase A snapshot | (configurable) |
+| [scripts/validate_judge.py](scripts/validate_judge.py) | L3 judge (UNCERTAIN bucket) | `runs/judge_validation/` |
+| [scripts/run_phase_a_only.py](scripts/run_phase_a_only.py) | Phase A pilot driver | (writes to `runs/phase_a_cache/`) |
+
+All accept `--help`. Most accept `--resume` to skip already-completed rows.
 
 ---
 
 ## Phase A caching
 
-`sieve/repro/cache.py::phase_a()` fingerprints the mask YAMLs and the issue text (not
-the candidate patch) and caches the generated reproduction tests under
-`runs/phase_a_cache/<fingerprint>.json`. Two different candidate patches for the same
-issue reuse the same Phase A artifacts, so swapping the patch author doesn't invalidate
-the cache. The cache is safe to delete; it will be repopulated on the next run.
+[sieve/repro/cache.py](sieve/repro/cache.py) fingerprints the mask YAMLs and the
+issue text (not the candidate patch) and caches generated reproduction tests
+under `runs/phase_a_cache/<fingerprint>.json`. Two different candidate patches
+for the same issue reuse the same Phase A artifacts, so swapping the patch
+author doesn't invalidate the cache. The cache is safe to delete; it will be
+repopulated on the next `validate_reproduction.py` run.
+
+For A/B comparisons against a frozen Phase A snapshot, use
+[scripts/validate_reproduction_with_cache_dir.py](scripts/validate_reproduction_with_cache_dir.py)
+with `--phase-a-cache-dir`.
 
 ---
 
-## Dry-run mode
+## Repository layout
 
-Set `SIEVE_DRY_RUN=1` to replace every `litellm.completion` call with a deterministic
-stub from `sieve/llm/dry_run.py`. Useful for:
-
-- Confirming imports and config wiring after a refactor.
-- CI-style smoke tests without burning API credits.
-- Reproducing the cascade's control flow on a laptop with no Docker (most layers will
-  still error without Docker, but imports and LLM paths are exercised).
+```
+.
+├── configs/models.json             # LLM role → model mapping
+├── data/instance_ids.json          # 50-instance SWE-bench Verified ID list
+├── docs/                           # design notes + per-version pipeline reports
+├── mini-swe-agent/                 # vendored external patch-author agent
+├── runs/                           # cached artifacts & results (mostly gitignored)
+│   ├── phase_a_cache/              # patch-blind reproduction-test cache
+│   ├── focal_snippets_cache/       # per-instance focal-file snippets
+│   ├── static_checks_validation*/
+│   ├── dynamic_regression_validation*/
+│   ├── reproduction_validation*/
+│   ├── judge_validation*/
+│   ├── retry_gpt5mini*/            # feedback manifest + retry preds
+│   ├── swe-verified_50_*/          # mini-swe-agent first-run preds
+│   └── sb-cli-reports/             # ground-truth labels from SWE-bench harness
+├── scripts/                        # entrypoints (validators, retry, reporting)
+└── sieve/
+    ├── llm/         # litellm client, role resolution, dry-run stub
+    ├── phases/      # static, dynamic (regression), reproduction, judge
+    ├── repro/       # Phase A/B: localize, generate, skeleton, runner, gate, cache
+    ├── judge/       # rubric assembly, aggregation
+    ├── prompts/     # Jinja2 YAML prompts + ARTIFACT_VERSIONS.json
+    └── utils/       # SWE-bench dataset helpers
+```
 
 ---
 
-## Key design documents
+## Helper scripts
 
-| File | Contents |
+| Script | Purpose |
 |---|---|
-| `docs/SIEVE_v3_project_plan.md`   | Current cascade + evolution design. |
-| `docs/SIEVE_v3_prompt_pack.md`    | Prompt-by-prompt spec for every role. |
-| `docs/SIEVE_refined_ideas.md`     | Background reasoning, rejected alternatives. |
-| `docs/implementation_status.md`   | Task-level progress against the plan. |
+| [scripts/extract_dataset_snapshot.py](scripts/extract_dataset_snapshot.py) | Snapshot the SWE-bench rows (for offline analysis). |
+| [scripts/extract_focal_snippets.py](scripts/extract_focal_snippets.py) | Pre-cache focal-file snippets for retry feedback. |
+| [scripts/reaggregate_with_new_routing.py](scripts/reaggregate_with_new_routing.py) | Re-run reproduction-layer aggregation with a different routing rule (no Docker, no LLM). |
+| [scripts/cascade_matrix.py](scripts/cascade_matrix.py) | Confusion matrix across the four cascade JSONs. |
+| [scripts/build_retry_manifest.py](scripts/build_retry_manifest.py) | Feedback manifest + retry filter for FAIL / ERROR / MISSING instances. |
+| [scripts/merge_retry_preds.py](scripts/merge_retry_preds.py) | Fallback-on-empty merge of first-run + retry preds into a single preds.json. |
+| [scripts/v15_pipeline_report.py](scripts/v15_pipeline_report.py) | End-to-end cost + verdict report. |
 
 ---
 
 ## Troubleshooting
 
-- **`ANTHROPIC_API_KEY` error.** Nothing in the repo should reference Anthropic anymore.
-  Grep for stray references: `grep -rn "anthropic\|claude-" sieve/ scripts/ configs/`.
-- **Docker-in-Docker permission errors during regression/repro.** Make sure the host
-  Docker daemon is running (`docker info`) and the user has group access.
-- **litellm `UnsupportedParamError` on Gemini.** `drop_params: true` is set in the
-  mini-swe-agent YAMLs; for SIEVE's own client, see `sieve/llm/client.py::_call_llm`.
-- **Phase A cache corruption.** Delete `runs/phase_a_cache/` — it will be regenerated.
-- **Evolution delta rejected.** Read the report at `runs/evolution/report_cycleN.md` —
-  the `artifact_edit_hint` tells you which prompt to edit and the evidence shows
-  representative instance IDs. Do one change at a time.
+- **Docker permission errors during regression / reproduction.** Confirm the
+  Docker daemon is running (`docker info`) and your user has group access.
+- **SWE-bench harness concurrency.** Cap at 2 concurrent
+  `swebench.harness.run_evaluation` jobs (one wastes wall clock; six overloads
+  Docker). Same applies to mini-swe-agent's `-w` flag.
+- **Phase A cache corruption.** Delete `runs/phase_a_cache/` — it will be
+  regenerated on the next `validate_reproduction.py` run.
+- **`UnsupportedParamError` on Gemini calls.** `drop_params: true` is set in
+  the mini-swe-agent YAMLs and in [sieve/llm/client.py](sieve/llm/client.py).
+- **Stale `_gpt5mini` paths.** The defaults in
+  [scripts/build_retry_manifest.py](scripts/build_retry_manifest.py) point at
+  the gpt-5-mini run directories — pass `--static` / `--dynreg` / `--repro` /
+  `--judge` / `--preds` to override for any other run.
