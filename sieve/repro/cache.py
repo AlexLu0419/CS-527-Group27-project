@@ -17,7 +17,7 @@ from sieve.repro.localize import Localization, localize
 
 logger = logging.getLogger("sieve.repro.cache")
 
-PHASE_A_SCHEMA_VERSION = "2b.phaseA.v10"
+PHASE_A_SCHEMA_VERSION = "2b.phaseA.v13"
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_CACHE_DIR = _REPO_ROOT / "runs" / "phase_a_cache"

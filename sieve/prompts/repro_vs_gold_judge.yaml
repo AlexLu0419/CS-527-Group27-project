@@ -1,0 +1,126 @@
+id: repro_vs_gold_judge
+version: 2
+role: judge
+temperature: 0.0
+system: |
+  You compare a generated reproduction test to the project's official
+  FAIL_TO_PASS (gold) test for the same issue, and decide whether they
+  exercise the same bug. You see BOTH the static test sources AND the
+  actual execution logs of each test on the buggy and on the gold-fixed
+  state of the repo. Use the logs to ground your judgment: a generated
+  test that flips its outcome between buggy and fixed states, in a way
+  that mirrors how the gold test flips, is strong evidence of equivalence.
+  A generated test that fails on the gold-fixed state, or whose output
+  doesn't change between buggy and fixed states, is weak evidence even
+  if the source code looks similar.
+template: |
+  We are evaluating a generated Python reproduction test against a gold
+  FAIL_TO_PASS test for the same SWE-bench issue. Score how similar they
+  are *in what they verify*, using the static sources AND the runtime
+  behavior on the buggy vs gold-fixed repo states.
+
+  --- ISSUE (problem statement) ---
+  {{ issue_text }}
+  --- END ISSUE ---
+
+  --- GOLD F2P TEST(S) — source ---
+  ```python
+  {{ gold_source }}
+  ```
+  --- END GOLD ---
+
+  --- GOLD F2P TEST(S) — runtime logs ---
+  Pre-gold (buggy code, gold test installed). Expected: FAIL.
+  exit_code = {{ gold_pre_exit }}
+  ```
+  {{ gold_pre_log }}
+  ```
+
+  Post-gold (fixed code, gold test installed). Expected: PASS.
+  exit_code = {{ gold_post_exit }}
+  ```
+  {{ gold_post_log }}
+  ```
+  --- END GOLD LOGS ---
+
+  --- GENERATED REPRODUCTION TEST — source ---
+  ```python
+  {{ generated_source }}
+  ```
+  --- END GENERATED ---
+
+  --- GENERATED TEST — runtime logs ---
+  Pre-gold (buggy code). For an ideal reproduction test this should FAIL
+  (exit != 0) with output containing "Issue reproduced" or AssertionError.
+  exit_code = {{ cand_pre_exit }}
+  bucket = {{ cand_pre_bucket }}
+  ```
+  {{ cand_pre_log }}
+  ```
+
+  Post-gold (fixed code). For an ideal reproduction test this should PASS
+  (exit == 0) with output containing "Issue resolved".
+  exit_code = {{ cand_post_exit }}
+  ```
+  {{ cand_post_log }}
+  ```
+  --- END GENERATED LOGS ---
+
+  Score the generated test against the gold using this rubric (integer 0-3):
+
+    3 = Same focal symbol AND asserts the same property/condition. Logs
+        confirm: pre-gold the generated test fails (issue reproduced) and
+        post-gold it passes (issue resolved), mirroring the gold's flip.
+    2 = Same focal symbol; checks a related property OR a strict subset
+        of the gold's assertions. Logs may show the right flip OR may
+        differ in stringency (e.g. fail in both states because the test
+        is over-strict, while still targeting the right symbol).
+    1 = Touches the same general feature/module but asserts a different
+        property, OR uses a wrong but plausible focal symbol. Logs often
+        show no behavioral flip.
+    0 = Unrelated, structurally broken (import/syntax errors that produce
+        "Issue not reproduced - other issues" or copy/timeout failure),
+        or only does setup/plumbing without a meaningful assertion.
+
+  Then classify the dominant DIFFERENCE_KIND between the two tests:
+
+    "equivalent"          - same check; logs flip in the same direction
+    "subset"              - generated checks a subset of what gold checks
+    "stringency_mismatch" - same focal symbol but different stringency
+                            (e.g. literal assertEqual vs semantic helper);
+                            often visible as cand failing on BOTH states
+    "wrong_focal"         - generated targets a different file/function
+    "setup_gap"           - generated test missing fixtures/settings the
+                            gold relies on; visible as setup-error logs
+    "wrong_property"      - same focal symbol, asserts the wrong thing;
+                            logs typically don't flip
+    "no_assertion"        - generated lacks any meaningful check; logs
+                            pass on both states regardless of bug
+    "broken"              - syntax/import error or non-runnable
+
+  Produce a 1-2 sentence rationale that names the focal symbol, the
+  specific assertion difference, AND cites whether the runtime logs
+  confirm or contradict the static-source impression.
+
+  Return ONLY the JSON object — no markdown, no commentary.
+
+output_schema:
+  type: object
+  required: [score, difference_kind, rationale]
+  properties:
+    score:
+      type: integer
+      enum: [0, 1, 2, 3]
+    difference_kind:
+      type: string
+      enum:
+        - equivalent
+        - subset
+        - stringency_mismatch
+        - wrong_focal
+        - setup_gap
+        - wrong_property
+        - no_assertion
+        - broken
+    rationale:
+      type: string

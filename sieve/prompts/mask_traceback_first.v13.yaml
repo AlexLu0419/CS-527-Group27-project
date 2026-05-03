@@ -1,21 +1,10 @@
 id: mask_traceback_first
-version: 2
+version: 1
 role: generate
 temperature: 0.5
 n_samples: 2
-# v2 changes vs v1 (the v15+L3 cascade — "L3 focal-error robustness"):
-#   - If exercising the traceback's code path raises AttributeError,
-#     TypeError, or ImportError on the focal symbol/attribute (rather than
-#     the issue's named exception), treat that as "Issue reproduced"
-#     (exit 2). The buggy repo legitimately lacks the working API; that's a
-#     manifestation of the bug.
-#   - Print the focal-error on a SEPARATE line ("focal-error: ...") before
-#     the verdict line so the cascade can detect it.
-#   - Everything else (exception-trajectory anchoring, message-fragment
-#     check, test-depth requirement, framework hint) unchanged.
 system: |
-  You are a software engineer writing a standalone test that reproduces a
-  bug, anchoring on a specific exception trajectory.
+  You are a software engineer writing a standalone test that reproduces a bug, anchoring on a specific exception trajectory.
 template: |
   The following issue was reported. A traceback is available — your test should
   reproduce the exact exception trajectory shown in the traceback.
@@ -35,18 +24,6 @@ template: |
   4. Prints "Issue reproduced" / "Issue resolved" / "Other issues" following the same convention as below
   5. Exits with codes 2 / 0 / 1 respectively
 
-  FOCAL-ERROR ROBUSTNESS (IMPORTANT — applies whenever the test targets a
-  specific symbol):
-  If exercising the code path triggers `AttributeError`, `TypeError`, or
-  `ImportError` whose message references {% if symbol_name %}the focal
-  symbol `{{ symbol_name }}`{% else %}the named API surface from the issue{% endif %}
-  — instead of the issue's named exception — this is also a manifestation
-  of the bug. In that case:
-    - Print `focal-error: <ExceptionType>: <message>` on a separate line FIRST.
-    - Then print "Issue reproduced".
-    - Exit with code 2.
-  Do NOT classify focal-symbol errors as "Other issues".
-
   Example of the print-and-exit convention:
 
   ```python
@@ -59,10 +36,6 @@ template: |
       if "<expected fragment>" in str(e):
           print("Issue reproduced"); sys.exit(2)
       print("Other issues"); sys.exit(1)
-  except (AttributeError, TypeError, ImportError) as e:
-      # Focal-error fallback: missing API on the buggy repo also reproduces the bug
-      print(f"focal-error: {type(e).__name__}: {e}")
-      print("Issue reproduced"); sys.exit(2)
   # If no exception: either resolved or the code path wasn't exercised
   print("Issue resolved"); sys.exit(0)
   ```
