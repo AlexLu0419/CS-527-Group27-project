@@ -1,4 +1,4 @@
-# Self-Improving Evaluation via Verification Evolution for SWE-Agents (SIEVE)
+# Self-Improving through Evaluation and Verification for software Engineering agents (SIEVE)
 
 SIEVE is a cascading verifier for SWE-agent-generated patches. Given an issue and a
 candidate patch, it runs a four-layer cascade — **static → regression → reproduction →
@@ -52,7 +52,7 @@ Single source of truth for every LLM role. The current mapping:
 | `mini_swe_agent` | `openai/gpt-5-mini`    | First-run + retry patch author. |
 
 Override any role at runtime with `SIEVE_MODEL_<ROLE>=...` (see
-`sieve/llm/roles.py`). The file is checked in — no secrets, only identifiers.
+`sieve/llm/roles.py`). 
 
 ---
 
@@ -76,20 +76,17 @@ patch ──▶  L1 static ──REJECT──▶ FAIL
 ```
 
 - **L1 static** ([sieve/phases/static.py](sieve/phases/static.py)) — single check:
-  `git apply --check` (dry-run, no disk modification). Heavyweight static checks
-  (flake8 lint-delta, ast.parse, semgrep) were removed because they added no signal
-  beyond the cheap apply check.
-- **L2a regression** ([sieve/phases/dynamic.py](sieve/phases/dynamic.py)) — applies
+  `git apply --check`.
+- **L2 regression** ([sieve/phases/dynamic.py](sieve/phases/dynamic.py)) — applies
   the patch and runs the instance's `PASS_TO_PASS` tests once on the patched repo.
-  Any failure is a hard REJECT. Pre-patch baseline is not run (PASS_TO_PASS is
-  guaranteed green on the un-patched repo by the SWE-bench dataset definition).
-- **L2b reproduction** ([sieve/phases/reproduction.py](sieve/phases/reproduction.py),
+  Any failure is a hard REJECT.
+- **L3 reproduction** ([sieve/phases/reproduction.py](sieve/phases/reproduction.py),
   [sieve/repro/](sieve/repro/)) — Phase A (patch-blind) uses `localize` → `generate`
-  to produce reproduction-test candidates per mask skeleton. Phase B runs each gated
+  to produce reproduction-test candidates per mask. Phase B runs each gated
   candidate against the patched container and computes a weighted vote across A/B/C
   buckets.
-- **L3 judge** ([sieve/phases/judge.py](sieve/phases/judge.py),
-  [sieve/judge/](sieve/judge/)) — fires only on UNCERTAIN from L2b. A 4-item rubric
+- **L4 judge** ([sieve/phases/judge.py](sieve/phases/judge.py),
+  [sieve/judge/](sieve/judge/)) — fires only on UNCERTAIN from L3. A 4-item rubric
   prompt produces per-criterion scores; `aggregate()` combines them with the repro
   signal into the final verdict.
 

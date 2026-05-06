@@ -4,7 +4,7 @@ Phase A (generate + gate) lives in ``sieve.repro.cache.phase_a``.
 Phase B (this module) takes the cached gated tests, runs them against the
 patched container, computes a weighted vote, and emits a verdict + feedback.
 
-Thresholds (SIEVE v3 §4.2):
+Thresholds:
     S >= 0.70 → PASS
     S <= 0.40 → FAIL
     else      → UNCERTAIN
@@ -226,7 +226,7 @@ def phase_b(
         message="; ".join(parts),
     )
 
-    # v9: synthesize reviewer notes on FAIL **and** UNCERTAIN when there's at
+    # synthesize reviewer notes on FAIL **and** UNCERTAIN when there's at
     # least one counted failing per-test. UNCERTAIN instances have the same
     # fail-signal shape (counted failing test + issue + patch) — just weaker
     # aggregate score — so the synth is equally useful as retry feedback.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""run_phase_a_only.py — Phase-A-only pilot driver for v7 gating.
+"""run_phase_a_only.py — Phase-A-only pilot driver.
 
 Regenerates Phase A (generate + gate) for every instance in preds.json
 and records per-instance bucket counts + drop reasons. Skips Phase B,

@@ -1,7 +1,6 @@
 """Lexicographic aggregation of reproduction + judge outputs into a FinalVerdict.
 
-Rule (SIEVE v3 §4.5, v1.1 upgrade tightening, v4 zero-signal routing,
-v8 bucket-C loosening):
+Rule:
 - If repro is PASS or FAIL → passthrough; judge is never consulted.
 - If repro is UNCERTAIN or UNCERTAIN_ZERO_SIGNAL and judge is provided:
     * Upgrade to PASS iff judge.verdict==ACCEPT AND confidence==high AND
@@ -56,7 +55,7 @@ def aggregate(repro: ReproductionVerdict, judge: "JudgeOutput | None") -> FinalV
     )
     if repro_v in ("PASS", "FAIL"):
         return base
-    # UNCERTAIN and UNCERTAIN_ZERO_SIGNAL both route to the judge (v4).
+    # UNCERTAIN and UNCERTAIN_ZERO_SIGNAL both route to the judge.
     # The upgrade path is additionally blocked on zero-signal below.
     zero_signal = (repro_v == "UNCERTAIN_ZERO_SIGNAL")
     if repro_v not in ("UNCERTAIN", "UNCERTAIN_ZERO_SIGNAL"):

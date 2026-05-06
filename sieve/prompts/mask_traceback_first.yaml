@@ -3,16 +3,6 @@ version: 2
 role: generate
 temperature: 0.5
 n_samples: 2
-# v2 changes vs v1 (the v15+L3 cascade — "L3 focal-error robustness"):
-#   - If exercising the traceback's code path raises AttributeError,
-#     TypeError, or ImportError on the focal symbol/attribute (rather than
-#     the issue's named exception), treat that as "Issue reproduced"
-#     (exit 2). The buggy repo legitimately lacks the working API; that's a
-#     manifestation of the bug.
-#   - Print the focal-error on a SEPARATE line ("focal-error: ...") before
-#     the verdict line so the cascade can detect it.
-#   - Everything else (exception-trajectory anchoring, message-fragment
-#     check, test-depth requirement, framework hint) unchanged.
 system: |
   You are a software engineer writing a standalone test that reproduces a
   bug, anchoring on a specific exception trajectory.

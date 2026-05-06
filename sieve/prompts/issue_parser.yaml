@@ -2,18 +2,6 @@ id: issue_parser
 version: 2
 role: localize
 temperature: 0.0
-# v2 changes vs v1 (the v15 / v15+L3 cascade):
-#   - REJECT reporter-local file paths from `affected_modules` (paths starting
-#     with `/Users/`, `/home/`, `C:\\`, `/private/`, `/tmp/`, etc., and any
-#     path that obviously belongs to the reporter's machine, not the project
-#     repository tree).
-#   - PROMOTE module names extracted from explicit `import X.Y.Z` or
-#     `from X.Y.Z import ...` statements in the issue body or reporter snippet
-#     — those name *project* modules.
-#   - All other behavior unchanged.
-# Empirical effect (gpt-5-mini mini-50): recovers the v13-A focal-empty
-# instances `django-11964, 12050, sphinx-10435, sphinx-9320` (whose v1
-# parses returned reporter-local paths or empty `affected_modules`).
 system: |
   You are an issue parser. Given a raw GitHub issue, extract structured fields.
   Only extract information that is explicitly present in the issue. Do not

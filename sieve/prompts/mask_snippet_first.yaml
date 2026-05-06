@@ -3,15 +3,6 @@ version: 2
 role: generate
 temperature: 0.5
 n_samples: 2
-# v2 changes vs v1 (the v15+L3 cascade — "L3 focal-error robustness"):
-#   - If executing the reporter's snippet raises AttributeError, TypeError,
-#     or ImportError on the focal symbol/attribute, treat that as "Issue
-#     reproduced" (exit 2). The buggy repo legitimately lacks the working
-#     API; that's a manifestation of the bug.
-#   - Print the focal-error on a SEPARATE line ("focal-error: ...") before
-#     the verdict line so the cascade can detect it.
-#   - Everything else (snippet fidelity, test-depth requirement, framework
-#     hint) unchanged.
 system: |
   You are a software engineer writing a standalone test that reproduces a
   bug, starting from the reporter's own example code.

@@ -2,18 +2,6 @@ id: localize_focal
 version: 2
 role: localize
 temperature: 0.0
-# v2 changes vs v1 (the v15 / v15+L3 cascade — "L2 dunder mapping"):
-#   - When the reporter triggers the bug via a Python builtin call on a model
-#     instance or value (e.g. `str(x)`, `repr(x)`, `bool(x)`, `len(x)`,
-#     `iter(x)`, `int(x)`, `float(x)`, `==` comparisons), the focal symbol
-#     is the corresponding *dunder* method on the value's class, not the
-#     calling code. Add an explicit dunder-mapping rule so the localizer
-#     picks `__str__` / `__repr__` / `__bool__` / `__len__` / `__iter__` /
-#     `__eq__` / etc. as `symbol_name` when those are the actual targets.
-#   - All other behavior unchanged.
-# Empirical effect (gpt-5-mini mini-50): combined with the issue-parser fix,
-# this recovers `django-11964` (focal symbol = `Choices.__str__` in
-# `django/db/models/enums.py`).
 system: |
   You are a software engineer investigating a bug report.
   Your job is to identify the specific function, method, or class whose

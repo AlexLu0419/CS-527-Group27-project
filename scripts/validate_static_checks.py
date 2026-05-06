@@ -307,12 +307,12 @@ def main() -> None:
             gt_label = "unknown"
 
         if not patch.strip():
-            print("  Empty patch — skipping")
+            print("  Empty patch — REJECT")
             results.append({
                 "instance_id": iid, "ground_truth": gt_label,
                 "modified_py_files": [],
-                "check_patch_applies": {"verdict": "PASS", "message": "empty patch"},
-                "error": "empty patch",
+                "check_patch_applies": {"verdict": "REJECT", "message": "empty patch"},
+                "error": None,
             })
         else:
             try:

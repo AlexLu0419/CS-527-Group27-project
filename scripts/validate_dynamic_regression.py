@@ -99,15 +99,15 @@ def process_instance(
     print(f"  PASS_TO_PASS: {len(p2p_list)} test(s)")
 
     if not patch_content.strip():
-        print("  Empty patch — SKIP")
+        print("  Empty patch — REJECT")
         return {
             "instance_id":    iid,
             "ground_truth":   gt_label,
             "p2p_count":      len(p2p_list),
-            "verdict":        "SKIP",
+            "verdict":        "REJECT",
             "message":        "empty patch",
             "new_failures":   [],
-            "error":          "empty patch",
+            "error":          None,
         }
 
     try:

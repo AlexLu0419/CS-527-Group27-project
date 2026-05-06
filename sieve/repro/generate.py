@@ -1,13 +1,7 @@
 """Generate reproduction test candidates across 3 masks × N samples.
 
-v6 reverted the Mask-4 (behavior-contract) experiment: its tests routed
-to A or C at the gate (never B) and the judge rated the resulting
-reproduction tests as *less* legitimate (v5 `failing_tests_legitimate`
-dropped 0.136 → 0.062). The contract mask relied on LLM-inferred
-"presumed:" expected/actual text (P3 issue enrichment), which produced
-over-specific assertions. See `runs/SIEVE_VARIANT_COMPARISON.md` for
-the post-mortem. The prompt file `mask_behavior_contract.yaml` remains
-on disk as project history but has no call site.
+Its tests routed to A or C at the gate (never B) and the judge rated the resulting
+reproduction tests as *less* legitimate (`failing_tests_legitimate` dropped 0.136 → 0.062).
 """
 from __future__ import annotations
 

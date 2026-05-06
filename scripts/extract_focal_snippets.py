@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """extract_focal_snippets.py — cache focal-file source snippets per instance.
 
-For each retry-roster instance in the v10 SIEVE run, this script spins up
+For each retry-roster instance, this script spins up
 the SWE-bench Docker image, cats the focal file, extracts ~30 lines around
 the focal symbol, and writes the snippet to
 `runs/focal_snippets_cache/{iid}.json`. The retry-manifest builder then
@@ -139,7 +139,7 @@ def _extract_snippet(
 
 
 def _symbol_map(text: str) -> list[dict]:
-    """v11 B: parse file via AST and return a compact list of top-level symbols.
+    """parse file via AST and return a compact list of top-level symbols.
 
     Returned shape:
       [{"kind": "class"|"func", "name": str, "line": int, "children": [{"kind","name","line"}...]}]
@@ -225,7 +225,7 @@ def _candidate_paths(cache: dict) -> list[str]:
 def process_instance(
     iid: str, phase_a_dir: Path, out_dir: Path, *, force: bool = False,
 ) -> dict:
-    """v11: collect up to MAX_SNIPPETS_PER_INSTANCE snippets + symbol maps.
+    """collect up to MAX_SNIPPETS_PER_INSTANCE snippets + symbol maps.
 
     Emits a new-format record:
         {"instance_id", "status", "focal_symbol",

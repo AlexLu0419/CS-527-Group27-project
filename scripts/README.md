@@ -139,17 +139,3 @@ verdict and lists the FP/FN instance IDs.
 --gt <gt.json>            required
 --label <str>             header above the matrix (default: "cascade")
 ```
-
-### `pipeline_report.py`
-Assembles a Markdown cost + layer-passthrough report after a full pipeline
-run. Reads token usage from `runs/llm_log/{role}.jsonl`, per-instance
-mini-swe-agent costs from `traj.json`, and the cascade results.json files.
-
-```
---since <ISO>             pipeline start timestamp (filters LLM log)
---retry-dir <dir>         default: runs/retry_gpt5mini
---retry-preds-dir <dir>   default: runs/retry_gpt5mini_preds
---repro-results <results.json>
---harness-report <report.json>   required
---out <markdown>          default: docs/pipeline_report.md
-```

@@ -15,14 +15,10 @@ from sieve.repro.cache import PhaseACache
 
 logger = logging.getLogger("sieve.judge.assemble")
 
-# Token-hygiene caps on judge prompt inputs. gpt-5-mini (400k ctx) can handle
-# much larger, but trimming reduces cost + avoids pathological blow-ups on long
-# issues. Existing local caps for traceback ([:1500]) and assertion ([:200])
-# and passing-test one-liners ([:120]) are kept in their extraction helpers.
-JUDGE_ISSUE_MAX_CHARS = 4000       # half of issue body cap (8192) for judge context
-JUDGE_DIFF_MAX_CHARS = 6000        # matches feedback.py patch_diff[:6000]
-JUDGE_TEST_SRC_MAX_CHARS = 3000    # per-test source (typical 60 lines * 50 chars)
-JUDGE_MAX_HUNKS = 4                # cap hunk count; context_lines=30/hunk unchanged
+JUDGE_ISSUE_MAX_CHARS = 4000      
+JUDGE_DIFF_MAX_CHARS = 6000       
+JUDGE_TEST_SRC_MAX_CHARS = 3000   
+JUDGE_MAX_HUNKS = 4                
 
 
 @dataclass

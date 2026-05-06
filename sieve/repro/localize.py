@@ -24,7 +24,7 @@ logger = logging.getLogger("sieve.repro.localize")
 _REPAIR_THRESHOLD = 85
 _TEST_DIR_LISTING_MAX = 120  # lines
 _MAX_FOCAL_FILES = 3         # top-k focal files for richer LLM context
-_MAX_SYMBOL_GREP_HITS = 3    # v12 A: cap files promoted by symbol search
+_MAX_SYMBOL_GREP_HITS = 3    # cap files promoted by symbol search
 
 
 def _is_test_path(p: str) -> bool:
@@ -77,7 +77,7 @@ def _grep_symbol_location(
 ) -> list[str]:
     """Repo-wide grep for the symbol's definition site.
 
-    v12 A strategy (tiered):
+    strategy (tiered):
       1. For dotted symbols (``Class.method``), grep first for the **class**
          name only — the class's module is the strongest signal. Method
          names like ``__str__`` / ``resolve`` / ``process`` match hundreds
@@ -302,7 +302,7 @@ def _localize_with_cid(issue: IssueBundle, cid: str) -> Localization:
         loc.import_path = raw_import
         loc.focal_file = focal_path
 
-        # v12 A: symbol-aware focal verification. If the LLM-picked symbol
+        # symbol-aware focal verification. If the LLM-picked symbol
         # is not actually defined in any of the candidate focal files, grep
         # the repo for the symbol's class/function line and promote the
         # matching file to focal_files[0]. This fixes the common case where
@@ -353,7 +353,7 @@ def _choose_focal_files(
     modules as a last resort. Deduplicates while preserving insertion order and
     caps at ``max_files`` to bound prompt size.
 
-    v12 C: filter test paths out of the primary result list. If the filter
+    filter test paths out of the primary result list. If the filter
     empties everything, fall back to including test paths (with caller aware
     of the weaker signal via `_is_test_path`).
     """
@@ -378,7 +378,7 @@ def _choose_focal_files(
             candidates.append(m)
 
     # 2) Module-to-path mapping ("a.b.c" → "a/b/c.py", optionally under "src/")
-    # v12 B: prefer "a/b/c.py" over "a/b/c/__init__.py" when both exist.
+    # prefer "a/b/c.py" over "a/b/c/__init__.py" when both exist.
     for mod in candidates:
         path = mod.replace(".", "/") + ".py"
         init_path = mod.replace(".", "/") + "/__init__.py"
@@ -415,7 +415,7 @@ def _choose_focal_files(
             if _add(repaired):
                 return found
 
-    # v12 C: if strict filtering left us empty, fall back to including test
+    # if strict filtering left us empty, fall back to including test
     # paths. Caller's downstream logic (symbol verification) can still
     # promote a non-test source file via `_grep_symbol_location`.
     if not found:

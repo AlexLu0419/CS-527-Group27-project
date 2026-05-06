@@ -1,6 +1,6 @@
 """Buggy-repo gate: run candidates on unpatched repo, classify into A/B/C, drop junk.
 
-Design (SIEVE v3 §4.2):
+Design:
 - Drop: import/syntax/fixture errors — irrelevant to the issue.
 - Bucket A (weight 1.0): assertion failure whose stdout shares ≥3 content words
   with the issue's expected/actual/body text.

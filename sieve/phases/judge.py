@@ -1,4 +1,4 @@
-"""Layer 3 — LLM-as-a-Judge tiebreaker (prompt pack §6).
+"""Layer 3 — LLM-as-a-Judge tiebreaker.
 
 Grades a candidate patch on a 4-item binary rubric + per-test assessment,
 computes weighted score client-side, and returns a structured JudgeOutput.

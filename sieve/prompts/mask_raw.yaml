@@ -3,20 +3,6 @@ version: 2
 role: generate
 temperature: 0.5
 n_samples: 2
-# v2 changes vs v1 (the v15+L3 cascade — "L3 focal-error robustness"):
-#   - If executing the test raises AttributeError, TypeError, or ImportError
-#     on the focal symbol/attribute (e.g. the focal class isn't yet exposed,
-#     a method doesn't exist, an import fails), treat that as the issue
-#     being reproduced (exit 2), not as "Other issues" (exit 1). The buggy
-#     repo legitimately lacks the working API; that's a manifestation of
-#     the bug.
-#   - Print the focal-error on a SEPARATE line ("focal-error: ...") before
-#     the verdict line so the cascade can detect it.
-#   - All other behavior (test-depth requirement, exit-code convention,
-#     framework hint) unchanged.
-# Empirical effect (gpt-5-mini mini-50, v15+L3 cascade): bucket-A coverage
-# rose 4× (7 → 28), zero-signal rate dropped from 34% to 4%, but cascade-
-# FP rate also rose. Net harness effect varies by run.
 system: |
   You are a software engineer writing a standalone test that reproduces a bug
   reported in an issue.

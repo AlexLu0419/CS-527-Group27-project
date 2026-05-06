@@ -57,19 +57,19 @@ MAX_FEEDBACK_CHARS = 9000
 
 # Per-block sub-caps.  Chosen so the sum comfortably fits MAX_FEEDBACK_CHARS
 # with headroom for block headers and separators.
-PRIOR_PATCH_MAX_CHARS = 3000      # v8: 4000 -> 3000 to make room for test-source block
+PRIOR_PATCH_MAX_CHARS = 3000    
 STATIC_MSG_MAX_CHARS = 1000
 REGRESSION_MSG_MAX_CHARS = 2000
 REPRO_STDOUT_MAX_CHARS = 1500
-REPRO_TEST_SOURCE_MAX_CHARS = 3600  # v8: embedded failing-test source (C1)
-REPRO_TEST_SOURCE_MAX_LINES = 60    # first N lines of the test source
-JUDGE_BLOCK_MAX_CHARS = 1300      # rubric lines + full two-part hallucination caveat
-OVERSIZED_PATCH_LINE_THRESHOLD = 100  # v8 C3: flag first-run patches larger than this
-FOCAL_SNIPPET_MAX_CHARS = 2200    # v10 A: focal-file source snippet cap
-FOCAL_SNIPPET_MAX_ENTRIES = 3     # v11 A: up to N snippets per instance
-FOCAL_SYMBOL_MAP_MAX_SYMBOLS = 12  # v11 B: top-level symbols per file in AST map
-FOCAL_SYMBOL_MAP_MAX_CHARS = 800   # v11 B: hard cap on rendered AST block per file
-MULTI_FILE_HINT_MIN_PATHS = 2     # v10 B: emit multi-file hint when issue mentions >= N paths
+REPRO_TEST_SOURCE_MAX_CHARS = 3600
+REPRO_TEST_SOURCE_MAX_LINES = 60
+JUDGE_BLOCK_MAX_CHARS = 1300
+OVERSIZED_PATCH_LINE_THRESHOLD = 100
+FOCAL_SNIPPET_MAX_CHARS = 2200
+FOCAL_SNIPPET_MAX_ENTRIES = 3
+FOCAL_SYMBOL_MAP_MAX_SYMBOLS = 12
+FOCAL_SYMBOL_MAP_MAX_CHARS = 800
+MULTI_FILE_HINT_MIN_PATHS = 2
 
 
 # ----------------------------------------------------------------------------
@@ -299,11 +299,6 @@ def _patch_vs_loc_warning(
     zero_signal: bool = False,
 ) -> str | None:
     """Flag the case where the prior patch edits none of the focal files.
-
-    Reverted to v13-A state (post v14/v14.1 experiments). Two-tier
-    wording: directive when the cascade has signal, hedged when
-    UNCERTAIN_ZERO_SIGNAL. Suppress entirely when prior patch already
-    overlaps focal — the agent is in the right place; let it refine.
     """
     if not patch_files or not focal_files:
         return None
@@ -347,7 +342,6 @@ def _load_focal_snippet(iid: str, snippet_dir: Path) -> dict | None:
         return None
     if rec.get("status") not in ("ok", "snippet_symbol_not_found"):
         return None
-    # v11 produces `entries` list; v10 had just top-level snippet. Accept either.
     if rec.get("entries") and any((e.get("snippet") or "").strip() for e in rec["entries"]):
         return rec
     if (rec.get("snippet") or "").strip():
@@ -356,10 +350,7 @@ def _load_focal_snippet(iid: str, snippet_dir: Path) -> dict | None:
 
 
 def _focal_entries(snippet: dict | None) -> list[dict]:
-    """Return the list of (v11) per-file entries from the snippet cache.
-
-    Backward-compat: v10 records have top-level 'snippet' etc. Treat as a
-    single-entry list.
+    """Return the list of per-file entries from the snippet cache.
     """
     if not snippet:
         return []
@@ -381,8 +372,8 @@ def _effective_focal_files(
 ) -> list[str]:
     """Return the focal-file set to surface to the agent.
 
-    Prefer files that the snippet extractor actually located content in
-    (v11: all up to 3 entries). Fall back to Phase-A focal_files
+    Prefer files that the snippet extractor actually located content in.
+    Fall back to Phase-A focal_files
     (test-path-filtered) when the snippet cache is missing.
     """
     entries = _focal_entries(snippet)
@@ -402,7 +393,7 @@ def _effective_focal_files(
 
 
 def _render_symbol_map(symbol_map: list[dict]) -> str:
-    """v11 B: render a compact AST symbol listing (hard-capped in chars)."""
+    """render a compact AST symbol listing (hard-capped in chars)."""
     if not symbol_map:
         return ""
     lines: list[str] = []
@@ -422,7 +413,7 @@ def _render_symbol_map(symbol_map: list[dict]) -> str:
 
 
 def _focal_source_snippet_block(iid: str, snippet_dir: Path) -> str:
-    """Render V11-A: up to 3 focal source snippets with AST symbol maps.
+    """up to 3 focal source snippets with AST symbol maps.
 
     Gracefully returns "" if the cache is missing.
     """
@@ -469,14 +460,8 @@ def _focal_source_snippet_block(iid: str, snippet_dir: Path) -> str:
 
 
 def _multi_file_hint(cache: dict | None, *, has_bucket_a: bool) -> str:
-    """V11-E: multi-file hint gated on cascade bucket-A admission.
+    """multi-file hint gated on cascade bucket-A admission.
 
-    The v10 hint fired on any issue mentioning >=2 .py paths. It misfired
-    on django-12039 (issue mentioned 2 paths, gold only needed 1) and
-    pushed the retry agent to over-expand. v11 narrows: only fire when
-    the reproduction gate also admitted a bucket-A test, indicating
-    strong enough signal that the expansion pressure won't damage a
-    cascade-FP.
     """
     if not has_bucket_a:
         return ""
@@ -534,23 +519,12 @@ def _gated_test_source(cache: dict | None, cand_id: str) -> str | None:
 
 
 def _synth_feedback_block(row: dict | None) -> str:
-    """Render the LLM-synthesized reviewer notes (v9-A, v9.1 narrow gate).
+    """Render the LLM-synthesized reviewer notes.
 
-    Reverted to v13-A state after v14/v14.1 experiments showed the wider
-    MEDIUM-confidence gate didn't net a headline gain (it amplified
-    cascade-FP misdirection on sphinx-10323; v14.1's overlap-suppress
-    fix recovered that, but the run still landed at 29/50 vs v13-A's 30
-    due to stochastic noise + ContentPolicy flakes).
-
-    Gate (v9.1): only render synth when the reproduction signal is
+    Only render synth when the reproduction signal is
     strong enough to be trusted:
       - cascade verdict is FAIL
       - AND ≥2 counted failing per-tests in bucket A (weight 1.0)
-
-    A defensive flat-text fallback is retained: when the validator
-    only saved `feedback` (flat string) without `feedback_detail`
-    (structured dict), still render the flat text rather than drop
-    the block silently.
     """
     if not row:
         return ""
@@ -657,7 +631,7 @@ def _count_patch_lines(patch: str) -> int:
 
 
 def _patch_size_note(patch: str) -> str:
-    """Render a soft proportionality nudge for oversized first-run patches (v8 C3).
+    """Render a soft proportionality nudge for oversized first-run patches.
 
     Returns empty string when the patch is under the threshold.
     """
@@ -677,7 +651,7 @@ def _patch_vs_loc_block(
     *,
     zero_signal: bool,
 ) -> str:
-    """v11 C: wrapper around `_patch_vs_loc_warning` so it can be assembled
+    """wrapper around `_patch_vs_loc_warning` so it can be assembled
     in the localization section rather than buried inside the reproduction
     block.
     """
@@ -703,10 +677,6 @@ def _repro_block(
     # now surface localization hints + drop-reason counts + issue-mentioned paths
     # so the retry solver is not flying blind.  Still no commitment to a verdict.
     if verdict == "UNCERTAIN_ZERO_SIGNAL":
-        # v11 C: focal-file list + patch-vs-loc warning moved out of this
-        # block into the localization section (assembled earlier in the
-        # manifest). Keep only ZS-specific signal here: drop reasons and
-        # the honest "zero reproduction evidence" preamble.
         drop_lines = _drop_summary(cache)
         parts = [
             "# Reproduction check: UNCERTAIN_ZERO_SIGNAL",
@@ -800,8 +770,6 @@ def _repro_block(
         if synth_block:
             parts.append("")
             parts.append(synth_block)
-        # v11 C: patch-vs-loc warning is now emitted in the localization
-        # section earlier in the manifest, not inside this repro block.
         return "\n".join(parts)
 
     return f"# Reproduction check: {verdict}"
@@ -984,10 +952,6 @@ def assemble_feedback(
     has_bucket_a = bool((repro_row.get("buckets_used") or {}).get("A", 0))
 
 
-    # v15 L1: focal/localization context appears BEFORE the prior-patch block
-    # so the retry agent sees the correct target before being anchored on its
-    # last (potentially wrong) attempt. v13-A had prior_patch first; v15+L3
-    # restored it to the end of the static-evidence section.
     blocks = [
         _issue_expectation_block(cache),
         _multi_file_hint(cache, has_bucket_a=has_bucket_a),
