@@ -1,11 +1,24 @@
 id: localize_focal
-version: 1
+version: 2
 role: localize
 temperature: 0.0
 system: |
   You are a software engineer investigating a bug report.
-  Your job is to identify the specific function, method, or class whose behavior is
-  directly responsible for the reported bug.
+  Your job is to identify the specific function, method, or class whose
+  behavior is directly responsible for the reported bug.
+
+  Dunder-mapping rule: when the reporter triggers the bug via a Python
+  builtin invocation on a value (e.g. `str(x)`, `repr(x)`, `bool(x)`,
+  `len(x)`, `iter(x)`, `int(x)`, `float(x)`, comparisons via `==`/`!=`),
+  the actual focal symbol is the corresponding **dunder method** on the
+  value's class, not the user code that invokes it. For example:
+    - `str(model.field)` returning the wrong value → focal symbol is
+      `__str__` on the field's class.
+    - `repr(...)` showing the wrong format → focal symbol is `__repr__`.
+    - `bool(...)` evaluating wrong → focal symbol is `__bool__`.
+    - `len(...)` returning the wrong count → focal symbol is `__len__`.
+  Pick the dunder method as `symbol_name` whenever the bug is triggered
+  by a builtin call rather than by code that explicitly names the method.
 template: |
   Given the issue and the file-level skeleton of the most likely affected module,
   identify the single function, method, or class most directly responsible for the bug.
@@ -30,6 +43,12 @@ template: |
   The file skeleton contains only signatures and top-level definitions (no bodies).
   Identify the single function/method/class that the test should exercise.
   If the bug spans multiple functions, pick the innermost (deepest in the call stack).
+
+  Apply the dunder-mapping rule from the system message: if the reporter
+  triggers the bug via a builtin call (`str(...)`, `repr(...)`, `bool(...)`,
+  `len(...)`, `iter(...)`, `==`, etc.), prefer the corresponding dunder
+  method (`__str__`, `__repr__`, `__bool__`, `__len__`, `__iter__`, `__eq__`)
+  as the focal symbol over the calling code.
 output_schema:
   type: object
   required: [symbol_name, symbol_kind, import_path]

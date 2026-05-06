@@ -1,0 +1,45 @@
+id: localize_focal
+version: 1
+role: localize
+temperature: 0.0
+system: |
+  You are a software engineer investigating a bug report.
+  Your job is to identify the specific function, method, or class whose behavior is
+  directly responsible for the reported bug.
+template: |
+  Given the issue and the file-level skeleton of the most likely affected module,
+  identify the single function, method, or class most directly responsible for the bug.
+
+  --- ISSUE ---
+  {{ one_line_summary }}
+
+  Expected: {{ expected_behavior }}
+  Actual: {{ actual_behavior }}
+
+  Traceback (if present):
+  {{ traceback or "(none)" }}
+
+  Reporter's snippet (if present):
+  {{ reporter_snippet or "(none)" }}
+  --- END ISSUE ---
+
+  --- FILE SKELETON ({{ focal_file_path }}) ---
+  {{ file_skeleton }}
+  --- END SKELETON ---
+
+  The file skeleton contains only signatures and top-level definitions (no bodies).
+  Identify the single function/method/class that the test should exercise.
+  If the bug spans multiple functions, pick the innermost (deepest in the call stack).
+output_schema:
+  type: object
+  required: [symbol_name, symbol_kind, import_path]
+  properties:
+    symbol_name:
+      type: string
+    symbol_kind:
+      type: string
+      enum: [function, method, class]
+    import_path:
+      type: string
+    rationale:
+      type: string

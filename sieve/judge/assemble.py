@@ -15,6 +15,11 @@ from sieve.repro.cache import PhaseACache
 
 logger = logging.getLogger("sieve.judge.assemble")
 
+JUDGE_ISSUE_MAX_CHARS = 4000      
+JUDGE_DIFF_MAX_CHARS = 6000       
+JUDGE_TEST_SRC_MAX_CHARS = 3000   
+JUDGE_MAX_HUNKS = 4                
+
 
 @dataclass
 class HunkContext:
@@ -55,6 +60,7 @@ class JudgeInput:
     failing_tests: list[FailingTestInfo] = field(default_factory=list)
     passing_tests: list[PassingTestInfo] = field(default_factory=list)
     context_lines: int = 30
+    zero_signal: bool = False  # true when no reproduction test survived admission
 
     def to_dict(self) -> dict:
         return {
@@ -65,6 +71,7 @@ class JudgeInput:
             "failing_tests": [t.to_dict() for t in self.failing_tests],
             "passing_tests": [t.to_dict() for t in self.passing_tests],
             "context_lines": self.context_lines,
+            "zero_signal": self.zero_signal,
         }
 
 
@@ -129,6 +136,18 @@ def _source_for(cache: PhaseACache, cand_id: str) -> str:
     return ""
 
 
+def _clip(text: str, limit: int) -> str:
+    """Tail-preserving clip — keep the head of the content (the first N chars).
+
+    Issue bodies and diffs are most informative at the top (titles, first hunk);
+    tests and hunks are likewise structured head-first. No truncation marker
+    added because the judge prompt is already terse about "given this input".
+    """
+    if not text or len(text) <= limit:
+        return text
+    return text[:limit]
+
+
 def assemble_judge_input(
     instance: dict,
     patch_content: str,
@@ -137,14 +156,21 @@ def assemble_judge_input(
     *,
     context_lines: int = 30,
 ) -> JudgeInput:
-    issue_text = strip_agent_narrative(instance.get("problem_statement", "") or "")
-    diff = strip_patch_metadata(patch_content or "")
+    issue_text = _clip(
+        strip_agent_narrative(instance.get("problem_statement", "") or ""),
+        JUDGE_ISSUE_MAX_CHARS,
+    )
+    diff = _clip(strip_patch_metadata(patch_content or ""), JUDGE_DIFF_MAX_CHARS)
 
     hunks: list[HunkContext] = []
     if diff.strip():
         with docker_session(instance["instance_id"]) as cid:
             if cid is not None:
                 hunks = _extract_hunks(diff, cid, context_lines=context_lines)
+    # Cap hunk count — large diffs can produce 10+ hunks; judge only needs a
+    # representative sample to reason about patch shape.
+    if len(hunks) > JUDGE_MAX_HUNKS:
+        hunks = hunks[:JUDGE_MAX_HUNKS]
 
     failing: list[FailingTestInfo] = []
     passing: list[PassingTestInfo] = []
@@ -157,7 +183,7 @@ def assemble_judge_input(
         else:
             failing.append(FailingTestInfo(
                 cand_id=pt.cand_id,
-                source=src,
+                source=_clip(src, JUDGE_TEST_SRC_MAX_CHARS),
                 assertion=_extract_assertion(pt.stdout_tail),
                 minimal_traceback=_extract_traceback(pt.stdout_tail),
             ))
@@ -170,4 +196,5 @@ def assemble_judge_input(
         failing_tests=failing,
         passing_tests=passing,
         context_lines=context_lines,
+        zero_signal=(repro.verdict == "UNCERTAIN_ZERO_SIGNAL"),
     )

@@ -9,6 +9,11 @@ system: |
 template: |
   An issue was reported. An engineer produced a candidate patch. Reproduction tests were generated independently of the patch; some passed on the patched code and some failed. Your job is to decide whether this patch should be accepted.
 
+  {% if zero_signal %}
+  IMPORTANT — NO VERIFIED REPRODUCTION AVAILABLE:
+  No reproduction test survived the buggy-repo admission gate for this instance, so the "Reproduction tests" section below is empty. You are reasoning from the patch + issue text alone. Commit to ACCEPT or REJECT only when you have strong syntactic or semantic evidence from the diff and issue. When in doubt, abstain to UNCERTAIN. Do not speculate on behavior you cannot verify.
+
+  {% endif %}
   --- ISSUE ---
   {{ issue_text }}
   --- END ISSUE ---

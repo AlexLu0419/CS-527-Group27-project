@@ -1,6 +1,6 @@
 """Issue parser: extract structured fields from a SWE-bench issue.
 
-LLM-first (prompt pack §1) with a regex sanity-check on the traceback field.
+LLM-first with a regex sanity-check on the traceback field.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from sieve.prompts import load_prompt
 
 logger = logging.getLogger("sieve.repro.issue")
 
-_BODY_MAX_CHARS = 4096
+_BODY_MAX_CHARS = 8192
 
 _TRACEBACK_RE = re.compile(
     r"Traceback \(most recent call last\):(?:\n.+)+?\n([A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Warning))",
@@ -62,7 +62,7 @@ def _extract_title_and_body(problem_statement: str) -> tuple[str, str]:
 
 
 def parse_issue(instance: dict) -> IssueBundle:
-    """Parse an issue into structured fields. Uses LLM per prompt pack §1."""
+    """Parse an issue into structured fields. Uses LLM."""
     instance_id = instance["instance_id"]
     repo = instance.get("repo", "")
     raw_text = instance.get("problem_statement", "") or ""

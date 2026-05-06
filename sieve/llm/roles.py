@@ -7,7 +7,7 @@ from pathlib import Path
 _CONFIG_PATH = Path(__file__).resolve().parents[2] / "configs" / "models.json"
 
 _FALLBACK_ROLE_MODELS: dict[str, str] = {
-    "localize": "gemini/gemini-2.5-flash",
+    "localize": "gemini/gemini-2.5-pro",
     "generate": "openai/gpt-5-mini",
     "feedback": "gemini/gemini-2.5-flash",
     "judge":    "gemini/gemini-2.5-pro",

@@ -52,26 +52,13 @@ def check_regression_tests(
     *,
     timeout: int = 120,
 ) -> CheckResult:
-    """Run PASS_TO_PASS tests before/after the patch; reject on new failures."""
+    """Run PASS_TO_PASS tests on the patched repo; reject on any failure."""
     if not pass_to_pass:
         return CheckResult(
             verdict="SKIP",
             check_name="regression_tests",
             message="no PASS_TO_PASS tests in instance",
         )
-
-    test_ids_str = " ".join(pass_to_pass)
-
-    pre_cmd = f"cd /testbed && python -m pytest {test_ids_str} --tb=no -q 2>&1"
-    try:
-        pre = docker_exec_login(container_id, pre_cmd, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return CheckResult(
-            verdict="ERROR",
-            check_name="regression_tests",
-            message="pre-patch test run timed out",
-        )
-    pre_failed = parse_pytest_output(pre.stdout)
 
     ok, err = apply_patch(container_id)
     if not ok:
@@ -81,6 +68,7 @@ def check_regression_tests(
             message=f"patch apply failed: {err}",
         )
 
+    test_ids_str = " ".join(pass_to_pass)
     post_cmd = f"cd /testbed && python -m pytest {test_ids_str} --tb=no -q 2>&1"
     try:
         post = docker_exec_login(container_id, post_cmd, timeout=timeout)
@@ -90,19 +78,15 @@ def check_regression_tests(
             check_name="regression_tests",
             message="post-patch test run timed out",
         )
-    post_failed = parse_pytest_output(post.stdout)
+    failed = sorted(parse_pytest_output(post.stdout))
 
-    new_failures = sorted(post_failed - pre_failed)
-    if new_failures:
-        sample = "; ".join(new_failures[:5])
-        suffix = f" (+ {len(new_failures) - 5} more)" if len(new_failures) > 5 else ""
-        msg = f"{len(new_failures)} regression(s): {sample}{suffix}"
+    if failed:
+        sample = "; ".join(failed[:5])
+        suffix = f" (+ {len(failed) - 5} more)" if len(failed) > 5 else ""
+        msg = f"{len(failed)} regression(s): {sample}{suffix}"
         return CheckResult(verdict="REJECT", check_name="regression_tests", message=msg)
 
-    msg = (
-        f"{len(pre_failed)} pre-existing failure(s), 0 new regressions "
-        f"across {len(pass_to_pass)} test(s)"
-    )
+    msg = f"0 regressions across {len(pass_to_pass)} test(s)"
     return CheckResult(verdict="PASS", check_name="regression_tests", message=msg)
 
 

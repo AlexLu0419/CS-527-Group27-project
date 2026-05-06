@@ -4,10 +4,16 @@
 Validates Layer-2b reproduction (Phase A generate+gate → Phase B weighted vote)
 from ``sieve.phases.reproduction`` on the 50-instance Gemini 2.5 Pro pilot set.
 
+By default Phase A is regenerated on stale cache fingerprints. Pass
+``--phase-a-cache-dir`` to read/write a different cache directory, and
+``--use-frozen-cache`` to bypass regeneration entirely (load whatever JSONs
+already live in that directory and call Phase B directly). The frozen-cache
+mode is the way to A/B-test patches against an archived Phase A snapshot.
+
 Outputs
 -------
-  runs/reproduction_validation/results.json
-  runs/reproduction_validation/summary.json
+  <output-dir>/results.json
+  <output-dir>/summary.json
 """
 from __future__ import annotations
 
@@ -19,27 +25,52 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-PREDS_JSON = (
+DEFAULT_PREDS = (
     REPO_ROOT
     / "runs/swe-verified_50_gemini-2.5-pro"
     / "swe_verified_50_gemini-2.5-pro-new"
     / "preds.json"
 )
-GT_JSON = (
+DEFAULT_GT = (
     REPO_ROOT
     / "runs/sb-cli-reports"
     / "gemini__gemini-2.5-pro.gemini-2.5-pro-mini50-run.json"
 )
-OUTPUT_DIR = REPO_ROOT / "runs/reproduction_validation"
-OUTPUT_JSON = OUTPUT_DIR / "results.json"
-SUMMARY_JSON = OUTPUT_DIR / "summary.json"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs/reproduction_validation"
+DEFAULT_PHASE_A_CACHE = REPO_ROOT / "runs/phase_a_cache"
 
-from sieve.phases.reproduction import run_reproduction_checks
-from sieve.repro.cache import phase_a
+PREDS_JSON: Path = DEFAULT_PREDS
+GT_JSON: Path = DEFAULT_GT
+OUTPUT_DIR: Path = DEFAULT_OUTPUT_DIR
+OUTPUT_JSON: Path = OUTPUT_DIR / "results.json"
+SUMMARY_JSON: Path = OUTPUT_DIR / "summary.json"
+
+from sieve.phases.reproduction import phase_b
+from sieve.repro.cache import PhaseACache, phase_a
 from sieve.utils.swebench import load_instances
 
 
-def process_instance(instance: dict, patch_content: str, gt_label: str, *, timeout: int) -> dict:
+def _load_frozen_cache(cache_dir: Path, iid: str) -> PhaseACache | None:
+    """Load a Phase A cache JSON directly off disk; never regenerate."""
+    p = cache_dir / f"{iid}.json"
+    if not p.exists():
+        return None
+    try:
+        return PhaseACache(**json.loads(p.read_text()))
+    except Exception as exc:
+        print(f"  [CACHE LOAD ERROR] {iid}: {exc}")
+        return None
+
+
+def process_instance(
+    instance: dict,
+    patch_content: str,
+    gt_label: str,
+    *,
+    timeout: int,
+    cache_dir: Path,
+    use_frozen_cache: bool,
+) -> dict:
     iid = instance["instance_id"]
     if not patch_content.strip():
         return {
@@ -51,8 +82,22 @@ def process_instance(instance: dict, patch_content: str, gt_label: str, *, timeo
             "buckets_used": {},
             "n_surviving": 0,
         }
+
     try:
-        cache = phase_a(instance)
+        if use_frozen_cache:
+            cache = _load_frozen_cache(cache_dir, iid)
+            if cache is None:
+                return {
+                    "instance_id": iid,
+                    "ground_truth": gt_label,
+                    "verdict": "ERROR",
+                    "score": 0.0,
+                    "message": f"no cache file in {cache_dir}",
+                    "buckets_used": {},
+                    "n_surviving": 0,
+                }
+        else:
+            cache = phase_a(instance, cache_dir=cache_dir)
     except Exception as exc:
         print(f"  [PHASE_A EXCEPTION] {exc}")
         return {
@@ -70,7 +115,7 @@ def process_instance(instance: dict, patch_content: str, gt_label: str, *, timeo
     print(f"  Phase A: {n_surviving} surviving gated tests (zero_signal={cache.zero_signal})")
 
     try:
-        verdict = run_reproduction_checks(instance, patch_content, cache=cache, timeout=timeout)
+        verdict = phase_b(instance, patch_content, cache, timeout=timeout)
     except Exception as exc:
         print(f"  [PHASE_B EXCEPTION] {exc}")
         return {
@@ -131,11 +176,36 @@ def confusion_stats(results: list[dict]) -> dict:
 
 
 def main() -> None:
+    global PREDS_JSON, GT_JSON, OUTPUT_DIR, OUTPUT_JSON, SUMMARY_JSON
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--timeout", type=int, default=60)
     parser.add_argument("--only", type=str, default=None, help="Comma-separated instance_ids")
+    parser.add_argument("--preds", type=Path, default=DEFAULT_PREDS,
+                        help="Path to preds.json (mini-swe-agent output)")
+    parser.add_argument("--gt", type=Path, default=DEFAULT_GT,
+                        help="Path to SWE-bench ground-truth report JSON")
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
+                        help="Directory for results.json / summary.json")
+    parser.add_argument("--phase-a-cache-dir", type=Path, default=DEFAULT_PHASE_A_CACHE,
+                        help="Phase A cache directory (default: runs/phase_a_cache)")
+    parser.add_argument("--use-frozen-cache", action="store_true",
+                        help="Load Phase A caches directly from --phase-a-cache-dir without "
+                             "calling phase_a() (no regeneration on stale fingerprint). "
+                             "Use this to A/B-test patches against an archived Phase A snapshot.")
     args = parser.parse_args()
+
+    PREDS_JSON = args.preds
+    GT_JSON = args.gt
+    OUTPUT_DIR = args.output_dir
+    OUTPUT_JSON = OUTPUT_DIR / "results.json"
+    SUMMARY_JSON = OUTPUT_DIR / "summary.json"
+
+    print(f"Preds              : {PREDS_JSON}")
+    print(f"GT                 : {GT_JSON}")
+    print(f"Output             : {OUTPUT_DIR}")
+    print(f"Phase A cache dir  : {args.phase_a_cache_dir}")
+    print(f"Frozen cache mode  : {args.use_frozen_cache}")
 
     preds: dict = json.loads(PREDS_JSON.read_text())
     gt_report: dict = json.loads(GT_JSON.read_text())
@@ -187,7 +257,12 @@ def main() -> None:
                 else "unresolved" if iid in unresolved_ids
                 else "unknown"
             )
-            row = process_instance(instance, patch, gt_label, timeout=args.timeout)
+            row = process_instance(
+                instance, patch, gt_label,
+                timeout=args.timeout,
+                cache_dir=args.phase_a_cache_dir,
+                use_frozen_cache=args.use_frozen_cache,
+            )
             results.append(row)
             OUTPUT_JSON.write_text(json.dumps(results, indent=2))
 
@@ -212,6 +287,10 @@ def main() -> None:
 
     summary = {
         "total": len(results),
+        "phase_a_cache_dir": str(args.phase_a_cache_dir),
+        "use_frozen_cache": args.use_frozen_cache,
+        "preds_path": str(PREDS_JSON),
+        "gt_path": str(GT_JSON),
         "confusion": stats,
         "zero_signal_rate": zero_signal_rate,
         "mean_surviving_when_nonzero": (sum(n_surviving) / len(n_surviving)) if n_surviving else 0.0,

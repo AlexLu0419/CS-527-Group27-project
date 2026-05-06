@@ -8,21 +8,18 @@ matrix.
 Checker evaluated
 -----------------
   check_regression_tests — run the PASS_TO_PASS tests from the SWE-bench
-    Verified dataset before and after the patch.  Tests that were passing
-    before and fail after are counted as regressions (REJECT).  Pre-existing
-    failures are ignored (delta approach).
+    Verified dataset on the patched container.  Any failing test counts as
+    a regression (REJECT).
 
   Unlike ``validate_dynamic_checks.py`` (which heuristically discovers test
   files from changed source paths), this script uses the authoritative
   PASS_TO_PASS list embedded in each SWE-bench instance.
 
-Delta approach
---------------
-  1. Run PASS_TO_PASS tests on the UNPATCHED container → pre_failed
-  2. Apply the candidate patch
-  3. Run the same tests again → post_failed
-  4. new_failures = post_failed − pre_failed
-  Verdict: REJECT if new_failures is non-empty, PASS otherwise.
+Approach
+--------
+  1. Apply the candidate patch to the container
+  2. Run the PASS_TO_PASS tests → failed
+  Verdict: REJECT if failed is non-empty, PASS otherwise.
 
 Output
 ------
@@ -49,20 +46,25 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-PREDS_JSON = (
+DEFAULT_PREDS = (
     REPO_ROOT
     / "runs/swe-verified_50_gemini-2.5-pro"
     / "swe_verified_50_gemini-2.5-pro-new"
     / "preds.json"
 )
-GT_JSON = (
+DEFAULT_GT = (
     REPO_ROOT
     / "runs/sb-cli-reports"
     / "gemini__gemini-2.5-pro.gemini-2.5-pro-mini50-run.json"
 )
-OUTPUT_DIR  = REPO_ROOT / "runs/dynamic_regression_validation"
-OUTPUT_JSON = OUTPUT_DIR / "results.json"
-SUMMARY_JSON = OUTPUT_DIR / "summary.json"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "runs/dynamic_regression_validation"
+
+# Rebound in main() once flags are parsed.
+PREDS_JSON: Path = DEFAULT_PREDS
+GT_JSON: Path = DEFAULT_GT
+OUTPUT_DIR: Path = DEFAULT_OUTPUT_DIR
+OUTPUT_JSON: Path = OUTPUT_DIR / "results.json"
+SUMMARY_JSON: Path = OUTPUT_DIR / "summary.json"
 
 # ---------------------------------------------------------------------------
 # Imports (after sys.path is set)
@@ -97,16 +99,15 @@ def process_instance(
     print(f"  PASS_TO_PASS: {len(p2p_list)} test(s)")
 
     if not patch_content.strip():
-        print("  Empty patch — SKIP")
+        print("  Empty patch — REJECT")
         return {
             "instance_id":    iid,
             "ground_truth":   gt_label,
             "p2p_count":      len(p2p_list),
-            "verdict":        "SKIP",
+            "verdict":        "REJECT",
             "message":        "empty patch",
-            "pre_failed":     [],
             "new_failures":   [],
-            "error":          "empty patch",
+            "error":          None,
         }
 
     try:
@@ -123,7 +124,6 @@ def process_instance(
             "p2p_count":      len(p2p_list),
             "verdict":        "ERROR",
             "message":        str(exc),
-            "pre_failed":     [],
             "new_failures":   [],
             "error":          str(exc),
         }
@@ -190,7 +190,7 @@ def confusion_stats(results: list[dict]) -> dict:
 def print_confusion(stats: dict, resolved_n: int, unresolved_n: int) -> None:
     tp, fp, tn, fn = stats["tp"], stats["fp"], stats["tn"], stats["fn"]
     print(f"\n{'─'*60}")
-    print("  check_regression_tests  (PASS_TO_PASS delta)")
+    print("  check_regression_tests  (PASS_TO_PASS post-patch)")
     print(f"{'─'*60}")
     print(f"  Ground-truth resolved   ({resolved_n:2d} patches):")
     print(f"    PASS (correct)  : {tn:2d}  TN")
@@ -213,6 +213,7 @@ def print_confusion(stats: dict, resolved_n: int, unresolved_n: int) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
+    global PREDS_JSON, GT_JSON, OUTPUT_DIR, OUTPUT_JSON, SUMMARY_JSON
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--resume",
@@ -223,9 +224,25 @@ def main() -> None:
         "--timeout",
         type=int,
         default=120,
-        help="Seconds allowed per test run (pre-patch and post-patch each). Default: 120",
+        help="Seconds allowed for the post-patch test run. Default: 120",
     )
+    parser.add_argument("--preds", type=Path, default=DEFAULT_PREDS,
+                        help="Path to preds.json (mini-swe-agent output)")
+    parser.add_argument("--gt", type=Path, default=DEFAULT_GT,
+                        help="Path to SWE-bench ground-truth report JSON")
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR,
+                        help="Directory for results.json / summary.json")
     args = parser.parse_args()
+
+    PREDS_JSON = args.preds
+    GT_JSON = args.gt
+    OUTPUT_DIR = args.output_dir
+    OUTPUT_JSON = OUTPUT_DIR / "results.json"
+    SUMMARY_JSON = OUTPUT_DIR / "summary.json"
+
+    print(f"Preds : {PREDS_JSON}")
+    print(f"GT    : {GT_JSON}")
+    print(f"Output: {OUTPUT_DIR}")
 
     # ------------------------------------------------------------------
     # Load preds + ground-truth labels

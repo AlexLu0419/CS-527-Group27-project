@@ -152,7 +152,7 @@ def complete(
     messages: list[dict],
     system: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 4096,
+    max_tokens: int = 16384,
     response_schema: dict | None = None,
     n: int = 1,
     seed: int | None = None,
@@ -279,6 +279,15 @@ def complete(
                     parsed = None
         if response_schema is not None and parsed is None and err is None:
             err = "schema_parse_failed"
+        # Detect empty-output responses (Gemini-2.5-pro can burn its entire
+        # max_tokens budget on internal reasoning and emit no visible text).
+        if err is None and not (text or "").strip():
+            comp_tokens = (usage or {}).get("completion_tokens") or 0
+            err = (
+                f"empty_response (completion_tokens={comp_tokens}; likely "
+                f"max_tokens budget exhausted by reasoning — try a higher "
+                f"max_tokens or shorter prompt)"
+            )
         results.append(
             LLMResponse(
                 text=text,

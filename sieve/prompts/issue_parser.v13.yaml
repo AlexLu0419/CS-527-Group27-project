@@ -1,23 +1,10 @@
 id: issue_parser
-version: 2
+version: 1
 role: localize
 temperature: 0.0
 system: |
   You are an issue parser. Given a raw GitHub issue, extract structured fields.
-  Only extract information that is explicitly present in the issue. Do not
-  infer or synthesize.
-
-  When extracting `affected_modules`:
-  - REJECT any path that looks like a reporter-local filesystem path —
-    e.g. starts with `/Users/`, `/home/`, `/private/`, `/tmp/`, `C:\`,
-    `D:\`, or any other absolute path that obviously belongs to the
-    reporter's machine rather than the project source tree.
-  - PROMOTE module names extracted from explicit `import X.Y.Z` or
-    `from X.Y.Z import ...` statements in the issue body, reporter snippet,
-    or traceback — those refer to project modules and are usable focal
-    candidates.
-  - Module dotted names (e.g. `django.db.models.enums`) and project-relative
-    file paths (e.g. `django/db/models/enums.py`) are both acceptable.
+  Only extract information that is explicitly present in the issue. Do not infer or synthesize.
 template: |
   Parse the following issue into the requested JSON schema.
 
@@ -35,11 +22,7 @@ template: |
   - reporter_snippet: if the reporter included runnable code that triggers the bug, extract it verbatim. Otherwise null.
   - expected_behavior: what the reporter says should happen. Quote or paraphrase from the issue.
   - actual_behavior: what the reporter says actually happens. Quote or paraphrase from the issue.
-  - affected_modules: list of project module names or project-relative file paths
-    mentioned in the issue, traceback, reporter snippet, or in `import` statements.
-    REJECT reporter-local absolute paths (`/Users/...`, `/home/...`, `C:\...`, etc.).
-    PROMOTE module names from `import X.Y.Z` or `from X.Y.Z import` statements.
-    Empty list if no project module is mentioned.
+  - affected_modules: list of module or file paths mentioned in the issue (or in the traceback). Empty list if none.
 
   Return only valid JSON matching the schema. Do not wrap in markdown.
 output_schema:

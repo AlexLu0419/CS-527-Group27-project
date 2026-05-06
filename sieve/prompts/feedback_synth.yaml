@@ -1,11 +1,11 @@
 id: feedback_synth
-version: 1
+version: 2
 role: feedback
 temperature: 0.0
 system: |
-  You are a software engineering reviewer. A patch has been produced to address an issue, but a reproduction test is still failing on the patched code. Your job is to explain WHY the patch is insufficient, in terms of the issue's underlying behavior — not in terms of the test itself.
+  You are a software engineering reviewer. A patch has been produced to address an issue, but a reproduction test is still failing on the patched code. Your job is to explain WHY the patch is insufficient, in terms of the issue's underlying behavior — not in terms of the test mechanics.
 
-  The engineer receiving this feedback will rewrite the patch. If you describe the specific test they failed, they will overfit to that test. Instead, describe the scenario the test represents and what the patch is still getting wrong about the reported behavior.
+  The engineer receiving this feedback will see the test source verbatim alongside your notes — don't paraphrase what the test does, they can read it. Focus on the gap between their patch and the issue's expected behavior.
 template: |
   Here is the issue that was reported:
 
@@ -30,11 +30,9 @@ template: |
   Failing assertion: {{ assertion_message or "(not captured)" }}
 
   Write feedback in 2-4 sentences, following this structure:
-  1. State the scenario the test exercises (in behavioral terms, e.g. "when the input is X, the expected output is Y, but your patch still produces Z")
-  2. Identify the most likely conceptual gap in the patch (e.g. missed edge case, wrong code location, symptom-only fix)
-  3. Give one concrete direction for the next attempt
-
-  Do not quote the test code. Do not reference the test file name. Describe the scenario in natural language.
+  1. State what the issue actually asks the code to do — in behavioral terms from the bug report's perspective, not the test's (e.g. "when the input is X, the expected output is Y").
+  2. Identify where the candidate patch falls short of that. If the gap is structural — wrong file, missing a call site, symptom-only fix — name the specific symbol or file involved, quoting from the patch where useful.
+  3. Give one concrete direction for the next attempt. Be specific: point at a function, a condition, or an API the next patch should consider.
 output_schema:
   type: object
   required: [scenario, conceptual_gap, direction]

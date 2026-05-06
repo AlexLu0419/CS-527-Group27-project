@@ -1,4 +1,4 @@
-"""Layer 3 — LLM-as-a-Judge tiebreaker (prompt pack §6).
+"""Layer 3 — LLM-as-a-Judge tiebreaker.
 
 Grades a candidate patch on a 4-item binary rubric + per-test assessment,
 computes weighted score client-side, and returns a structured JudgeOutput.
@@ -58,6 +58,7 @@ def run_judge(judge_input: JudgeInput, *, model: str | None = None) -> JudgeOutp
         failing_tests=judge_input.failing_tests,
         passing_tests=judge_input.passing_tests,
         context_lines=judge_input.context_lines,
+        zero_signal=judge_input.zero_signal,
     )
 
     resp = complete(

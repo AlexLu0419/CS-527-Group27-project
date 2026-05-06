@@ -1,4 +1,4 @@
-"""Haiku-class scenario-description synthesizer (prompt pack §5)."""
+"""Haiku-class scenario-description synthesizer."""
 from __future__ import annotations
 
 import re
